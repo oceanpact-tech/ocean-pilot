@@ -1,35 +1,47 @@
-#include "dji_interface.hpp"
+/**
+ ******************************************************************************
+ * @file    main.cpp
+ * @brief   Main entry point for the MAVLink-to-DJI WildBridge application.
+ *
+ * @author  Thiago Marques de Oliveira
+ * @date    September, 2026
+ ******************************************************************************
+ */
 
-#include <mutex>
-#include <condition_variable>
+
+/* Includes ------------------------------------------------------------------*/
+
+#include "dji_interface.hpp"
 #include <iostream>
+#include <boost/asio/io_context.hpp>
+
+
+/* Aliases -------------------------------------------------------------------*/
+
+namespace net = boost::asio;
+
+
+/* Entrypoint ----------------------------------------------------------------*/
 
 int main(int argc, char* argv[]) {
 
-    DJIInterface dji("192.168.228.24");
+    // The io_context is required for all I/O
+    net::io_context ioc;
 
-    // Variáveis para a sincronização
-    std::mutex mtx;
-    std::condition_variable cv;
-    bool requisicao_concluida = false;
+    // Passa o maestro para a interface se conectar
+    DJIInterface dji(ioc, "192.168.228.24");
 
     std::cout << "Conectado! Enviando comando de teste..." << std::endl;
 
     // Dispara a requisição e passa uma função lambda como callback
-    dji.request_takeoff([&]() {
-        // Este bloco será executado DENTRO da thread do HTTP quando ela terminar
-        std::lock_guard<std::mutex> lock(mtx);
-        requisicao_concluida = true;
-        cv.notify_one(); // Desperta a thread principal!
+    dji.request_takeoff([]() {
+        std::cout << "Callback executado internamente pela corrotina!" << std::endl;
     });
 
-    // --- Thread Principal ---
-    // Cria um lock único e usa a condition_variable para dormir (sem consumir CPU)
-    // O wait só libera quando a thread do HTTP chamar o notify_one() E o booleano for true
-    std::unique_lock<std::mutex> lock(mtx);
-    cv.wait(lock, [&]() { return requisicao_concluida; });
+    // Run the I/O service. The call will return when POST operation is complete
+    ioc.run();
 
-    std::cout << "O programa principal acordou! Resposta recebida. Encerrando." << std::endl;
+    std::cout << "Fila de eventos vazia. Resposta processada e programa encerrando." << std::endl;
 
     return 0;
 }

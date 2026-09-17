@@ -1,69 +1,120 @@
+/**
+ ******************************************************************************
+ * @file    http_handler.cpp
+ * @brief   Implementation of the HttpHandler class.
+ *
+ * @author  Thiago Marques de Oliveira
+ * @date    September, 2026
+ ******************************************************************************
+ */
+
+
+/* Private Includes ----------------------------------------------------------*/
+
 #include "http_handler.hpp"
 
+#include <iostream>
 
-// Método principal de envio assíncrono (Fire-and-Forget)
+// Asio
+#include <boost/asio/co_spawn.hpp>
+#include <boost/asio/as_tuple.hpp>
+#include <boost/asio/ip/tcp.hpp>
+#include <boost/asio/this_coro.hpp>
+#include <boost/asio/detached.hpp>
+
+// Beast
+#include <boost/beast/core.hpp>
+#include <boost/beast/http.hpp>
+#include <boost/beast/version.hpp>
+
+
+/* Private Aliases -----------------------------------------------------------*/
+
+namespace beast = boost::beast;
+namespace http = beast::http;
+
+using tcp = net::ip::tcp;
+
+
+/* Public Class Methods ------------------------------------------------------*/
+
 void HttpHandler::post_async(
-        const std::string& endpoint, 
-        const std::string& payload,
-        std::function<void()> on_complete) 
-{  
-    // NOTA: Passamos as variáveis por VALOR [host, port, endpoint, payload]
-    // para a thread, garantindo que não teremos falha de segmentação 
-    // caso as variáveis originais sejam destruídas antes da thread terminar.
-    
-    std::thread([host = host_, port = port_, endpoint, payload, on_complete]() {
-        try {
-            net::io_context ioc;
-            tcp::resolver resolver(ioc);
-            beast::tcp_stream stream(ioc);
+    const std::string endpoint, 
+    const std::string payload,
+    std::function<void()> on_complete) 
+{
+    // Launch the asynchronous operation
+    net::co_spawn(
+        this->ioc_, 
+        do_post(std::move(endpoint), std::move(payload), on_complete), net::detached
+    );
+}
 
-            // Resolve DNS/IP e conecta
-            auto const results = resolver.resolve(host, port);
-            stream.connect(results);
 
-            // Prepara a requisição HTTP POST
-            http::request<http::string_body> req{http::verb::post, endpoint, 11};
-            req.set(http::field::host, host);
-            req.set(http::field::user_agent, BOOST_BEAST_VERSION_STRING);
-            req.set(http::field::content_type, "text/plain");
-            req.body() = payload;
-            req.prepare_payload();
+/* Private Class Methods -----------------------------------------------------*/
 
-            // Envia
-            http::write(stream, req);
+net::awaitable<void> HttpHandler::do_post(
+    std::string endpoint, 
+    std::string payload, 
+    std::function<void()> on_complete)
+{
+    try {
+        auto executor = co_await net::this_coro::executor;
+        auto resolver = tcp::resolver{ executor };
+        auto stream   = beast::tcp_stream{ executor };
 
-            // Lê a resposta (opcional, útil para debug)
-            beast::flat_buffer buffer;
-            http::response<http::string_body> res;
-            beast::error_code ec;
-            http::read(stream, buffer, res, ec);
-            
-            if (ec) {
-                // Se o servidor for "preguiçoso" e mandar HTTP mal formatado,
-                // apenas registramos o aviso ao invés de tratar como erro fatal.
-                std::cout << "[Aviso] Resposta fora do padrao no endpoint [" << endpoint << "]: " << ec.message() << "\n";
-                if (!res.body().empty()) {
-                    std::cout << "Corpo lido (parcial): " << res.body() << "\n";
-                }
-            } else {
-                std::cout << "Resposta do drone [" << endpoint << "]: " << res.body() << "\n";
-            }
-            
-            // Encerra a conexão de forma limpa
-            stream.socket().shutdown(tcp::socket::shutdown_both, ec);
-
-            // Avisa quem chamou que o trabalho terminou
-            if (on_complete) {
-                on_complete();
-            }
-        } 
-        catch (std::exception const& e) {
-            std::cerr << "[HttpHandler] Falha no POST para " << endpoint << ": " << e.what() << '\n';
+        // Look up the domain name
+        auto const results = co_await resolver.async_resolve(this->host_, this->port_);
         
-            // Chama o callback mesmo com erro para não travar o programa principal
-            if (on_complete) {
-                on_complete();
-            }
+        // Set the timeout
+        stream.expires_after(std::chrono::seconds(30));
+
+        // Make the connection on the IP address we get from a lookup
+        co_await stream.async_connect(results);
+
+        // Set up an HTTP POST request message
+        http::request<http::string_body> req{ http::verb::post, endpoint, 11 };
+        req.set(http::field::host, this->host_);
+        req.set(http::field::user_agent, BOOST_BEAST_VERSION_STRING);
+        req.set(http::field::content_type, "text/plain");
+        req.body() = payload;
+        req.prepare_payload();
+
+        // Set the timeout
+        stream.expires_after(std::chrono::seconds(30));
+
+        // Send the HTTP request to the remote host
+        co_await http::async_write(stream, req);
+
+        // This buffer is used for reading and must be persisted
+        beast::flat_buffer buffer;
+
+        // Declare a container to hold the response
+        http::response<http::string_body> res;
+
+        // =======================================
+        constexpr auto tolerant_awaitable = net::as_tuple(net::use_awaitable);
+        auto [ec, bytes_read] = co_await http::async_read(stream, buffer, res, tolerant_awaitable);
+
+        if(ec) {
+            std::cout << "[Aviso] Resposta fora do padrao [" << endpoint << "]: " << ec.message() << "\n";
+        } else {
+            std::cout << "Resposta do drone [" << endpoint << "]: " << res.body() << "\n";
         }
-    }).detach(); // .detach() libera a thread para rodar solta em background
+
+        beast::error_code shutdown_ec;
+        stream.socket().shutdown(tcp::socket::shutdown_both, shutdown_ec);
+
+         // =======================================
+
+        if (on_complete) {
+            on_complete();
+        }
+    } 
+    catch (std::exception const& e) {
+        std::cerr << "[HttpHandler] Falha no POST para " << endpoint << ": " << e.what() << '\n';
+        if (on_complete) {
+            on_complete();
+        }
+    }
 }
