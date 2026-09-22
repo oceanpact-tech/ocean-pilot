@@ -1,4 +1,4 @@
-bin/
-build/
-third_party/WildBridge/
-third_party/boost_bkp/
+.vscode/
+
+ground-station/bin/
+ground-station/build/
