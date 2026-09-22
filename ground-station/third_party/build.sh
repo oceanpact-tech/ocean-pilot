@@ -6,8 +6,14 @@ sudo apt update
 sudo apt install -y "${DEPENDENCIES[@]}"
 
 if [ -d "boost" ]; then
-    if source boost/bootstrap.sh; then
-        source boost/b2
+    if ! source boost/bootstrap.sh; then
+        echo "Failed to bootstrap boost"
+        exit -1
+    fi
+    
+    if ! source boost/b2; then
+        echo "Failed to build boost"
+        exit -1
     fi
 fi
 
