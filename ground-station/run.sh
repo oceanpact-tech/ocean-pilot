@@ -1,3 +1,3 @@
 cd bin
-./mavlink_bridge
+./ocean_pilot
 cd ..

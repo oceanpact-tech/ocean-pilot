@@ -1,50 +1,59 @@
 cmake_minimum_required(VERSION 3.20)
-project(mavlink_bridge CXX)
+project(ocean_pilot CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-# Define a pasta onde os executáveis gerados serão salvos
+# Set output directory for binaries
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/bin")
 
-# 1. Definir o caminho raiz usando a nomenclatura que o CMake moderno espera
+# Boost setup
 set(Boost_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/third_party/boost")
 set(Boost_NO_SYSTEM_PATHS ON)
 
-# 2. Apontar onde estão os arquivos *.cmake gerados no build do Boost
-# O Boost coloca os arquivos de configuração do CMake no próprio stage/lib/cmake
+# Boost cmake config 
 list(PREPEND CMAKE_PREFIX_PATH 
     "${Boost_ROOT}/stage/lib/cmake"
     "${Boost_ROOT}"
 )
 
-# 3. Chamar o find_package em modo CONFIG (usa os configs do próprio Boost, não o FindBoost do CMake)
-find_package(Boost REQUIRED CONFIG COMPONENTS system)
+# Dependencies
+find_package(Boost REQUIRED CONFIG COMPONENTS system json) # Make sure to use its own cmake config files
 find_package(OpenSSL REQUIRED)
 
-# 4. Executável
-add_executable(${PROJECT_NAME}
+# Source files
+set(SOURCE_FILES
     src/main.cpp
     src/http_handler.cpp
-    src/dji_interface.cpp 
+    src/dji_interface.cpp
+    src/telemetry_handler.cpp
+
+    src/transport/tcp_handler.cpp
 )
 
-# 5. Includes
+# Executable
+add_executable(${PROJECT_NAME}
+    ${SOURCE_FILES}
+)
+
+# Includes
 target_include_directories(${PROJECT_NAME} PRIVATE
     include
+    include/transport
+    include/custom_types
     ${OPENSSL_INCLUDE_DIR}
-    # third_party/mavlink/c_library_v2
 )
 
-# 6. Linkagem direta com os targets modernos do Boost
+# Link libraries
 target_link_libraries(${PROJECT_NAME} PRIVATE
     Boost::system
+    Boost::json
     OpenSSL::SSL
     OpenSSL::Crypto
     pthread
 )
 
-# 7. Garantir que o binário encontre os .so em runtime
+# Set RPATH for runtime library search path
 set_target_properties(${PROJECT_NAME} PROPERTIES
     BUILD_RPATH "${Boost_ROOT}/stage/lib"
 )

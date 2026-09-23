@@ -16,19 +16,21 @@
 
 /* Public Class Methods ------------------------------------------------------*/
 
-/* @brief Starts telemetry stream
+/* @brief Stops telemetry stream
  */
-// DJIInterface::DJIInterface(const std::string& rc_ip) {
-//     // TO DO: fazer verificação de auto descovery se ip for uma string vazia
-// }
+DJIInterface::~DJIInterface() {
+    this->stop_telemetry_stream();
+}
 
-// TODO
-// /* @brief Stops telemetry stream
-//  */
-// DJIInterface::~DJIInterface() {
-//     // this->stop_telemetry_stream();
-// }
+void DJIInterface::start_telemetry_stream() 
+{
+    this->telemetry_client_.start_comm();
+}
 
+void DJIInterface::stop_telemetry_stream() 
+{
+    this->telemetry_client_.stop_comm();
+}
 
 void DJIInterface::request_takeoff(std::function<void()> on_complete) {
     // Converte a string_view do namespace para std::string e envia vazio no payload

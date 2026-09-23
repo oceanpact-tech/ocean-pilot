@@ -104,8 +104,7 @@ net::awaitable<void> HttpHandler::do_post(
 
         beast::error_code shutdown_ec;
         stream.socket().shutdown(tcp::socket::shutdown_both, shutdown_ec);
-
-         // =======================================
+        // =======================================
 
         if (on_complete) {
             on_complete();
