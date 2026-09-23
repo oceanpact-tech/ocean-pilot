@@ -2,3 +2,5 @@
 
 ground-station/bin/
 ground-station/build/
+
+tmp/
