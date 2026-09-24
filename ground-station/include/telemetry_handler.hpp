@@ -68,40 +68,40 @@ public:
     std::string get_drone_name();
 
     /// @brief Get aircraft velocity (x, y, z).
-    Vector3D get_speed();
+    Speed3D get_speed();
 
-    // /// @brief Get compass heading in degrees.
-    // boost::json::object get_heading();
+    /// @brief Get compass heading in degrees.
+    double get_heading();
     
-    // /// @brief Get aircraft attitude (pitch, roll, yaw).
-    // boost::json::object get_attitude();
+    /// @brief Get aircraft attitude (pitch, roll, yaw) in degrees.
+    Attitude3D get_attitude();
     
-    // /// @brief Get aircraft 3D location (latitude, longitude, altitude).
-    // boost::json::object get_location();
+    /// @brief Get aircraft 3D location (latitude, longitude, altitude). GPS position.
+    Location3D get_location();
     
-    // /// @brief Get gimbal attitude (pitch, roll, yaw).
-    // boost::json::object get_gimbal_attitude();
+    /// @brief Get gimbal attitude (pitch, roll, yaw) in degrees.
+    Attitude3D get_gimbal_attitude();
     
-    // /// @brief Get gimbal joint attitude (pitch, roll, yaw).
-    // boost::json::object get_joint_gimbal_attitude();
+    /// @brief Get gimbal joint attitude (pitch, roll, yaw) in degrees.
+    Attitude3D get_gimbal_joint_attitude();
 
-    // /// @brief Get camera zoom focal length.
-    // boost::json::object get_zoom_focal_length();
+    /// @brief Get camera zoom focal length.
+    double get_zoom_focal_length();
     
-    // /// @brief Get camera hybrid focal length.
-    // boost::json::object get_hybrid_focal_length();
+    /// @brief Get camera hybrid focal length.
+    double get_hybrid_focal_length();
     
-    // /// @brief Get camera optical focal length.
-    // boost::json::object get_optical_focal_length();
+    /// @brief Get camera optical focal length.
+    double get_optical_focal_length();
     
-    // /// @brief Get camera zoom ratio.
-    // boost::json::object get_zoom_ratio();
+    /// @brief Get camera zoom ratio.
+    double get_zoom_ratio();
 
-    // /// @brief Get battery level percentage.
-    // boost::json::object get_battery_level();
+    /// @brief Get battery level percentage.
+    int get_battery_level();
     
-    // /// @brief Get GPS satellite count.
-    // boost::json::object get_satellite_count();
+    /// @brief Get GPS satellite count.
+    int get_satellite_count();
 
     // /// @brief Whether the drone is ready to take off / arm (derived on the aircraft side).
     // boost::json::object is_ready_to_takeoff();
@@ -216,4 +216,17 @@ protected:
 private:
     std::mutex telemetry_mtx_; /// Telemetry mutex
     boost::json::object latest_telemetry_; /// Lastest telemetry data received from the drone
+
+    /**
+     * @brief Safely extracts a double from a boost::json::value, handling integer types.
+     * @param val The JSON value to parse.
+     * @return The extracted number as double, or 0.0 if the type is invalid.
+     */
+    inline double jv_to_double(const boost::json::value& val)
+    {
+        if (val.is_double()) return val.as_double();
+        if (val.is_int64())  return static_cast<double>(val.as_int64());
+        if (val.is_uint64()) return static_cast<double>(val.as_uint64());
+        return 0.0; // Default if it is not a number
+    };
 };

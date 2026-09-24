@@ -69,8 +69,20 @@ public:
      */
     void request_takeoff(std::function<void()> on_complete = nullptr);
 
-    boost::json::object request_all_states(bool verbose = false) { return this->telemetry_client_.request_all_states(verbose); }
-    Vector3D get_speed() { return this->telemetry_client_.get_speed(); }
+    inline boost::json::object request_all_states(bool verbose = false) { return this->telemetry_client_.request_all_states(verbose); }
+    inline std::string get_drone_name()             { return this->telemetry_client_.get_drone_name(); }
+    inline Speed3D     get_speed()                  { return this->telemetry_client_.get_speed(); }
+    inline double      get_heading()                { return this->telemetry_client_.get_heading(); }
+    inline Attitude3D  get_attitude()               { return this->telemetry_client_.get_attitude(); }
+    inline Location3D  get_location()               { return this->telemetry_client_.get_location(); }
+    inline Attitude3D  get_gimbal_attitude()        { return this->telemetry_client_.get_gimbal_attitude(); }
+    inline Attitude3D  get_gimbal_joint_attitude()  { return this->telemetry_client_.get_gimbal_joint_attitude(); }
+    inline double      get_zoom_focal_length()      { return this->telemetry_client_.get_zoom_focal_length(); }
+    inline double      get_hybrid_focal_length()    { return this->telemetry_client_.get_hybrid_focal_length(); }
+    inline double      get_optical_focal_length()   { return this->telemetry_client_.get_optical_focal_length(); }
+    inline double      get_zoom_ratio()             { return this->telemetry_client_.get_zoom_ratio(); }
+    inline int         get_battery_level()          { return this->telemetry_client_.get_battery_level(); }
+    inline int         get_satellite_count()        { return this->telemetry_client_.get_satellite_count(); }
 
 
 private:
