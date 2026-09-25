@@ -103,109 +103,109 @@ public:
     /// @brief Get GPS satellite count.
     int get_satellite_count();
 
-    // /// @brief Whether the drone is ready to take off / arm (derived on the aircraft side).
-    // boost::json::object is_ready_to_takeoff();
+    /// @brief Whether the drone is ready to take off / arm (derived on the aircraft side).
+    bool is_ready_to_takeoff();
 
-    // /// @brief Reason the drone cannot take off: DJIDeviceStatus name, 'NONE', or 'UNKNOWN'.
-    // boost::json::object get_takeoff_block_reason();
+    /// @brief Reason the drone cannot take off: DJIDeviceStatus name, 'NONE', or 'UNKNOWN'.
+    std::string get_takeoff_block_reason();
 
-    // /// @brief Get home location (latitude, longitude).
-    // boost::json::object get_home_location();
+    /// @brief Get home location (latitude, longitude).
+    Location2D get_home_location();
     
-    // /// @brief Get distance to home in meters.
-    // boost::json::object get_distance_to_home();
+    /// @brief Get distance to home in meters.
+    double get_distance_to_home();
 
-    // /// @brief Get the last LRF-locked target position (latitude, longitude, altitude).
-    // boost::json::object get_lrf_target();
+    /// @brief Get the last LRF-locked target position (latitude, longitude, altitude).
+    Location3D get_lrf_target();
 
-    // /** 
-    //  * @brief Id of the waypoint the streamed 'waypointReached' currently refers to.
-    //  *
-    //  * Mirrors DroneController._waypointSeq, incremented by the app for every
-    //  *requestSendGoToWaypointNoseForward. Returns -1 if telemetry hasn't reported it yet.
-    //  */
-    // boost::json::object get_waypoint_seq();
+    /** 
+     * @brief Id of the waypoint the streamed 'waypointReached' currently refers to.
+     *
+     * Mirrors DroneController._waypointSeq, incremented by the app for every
+     *requestSendGoToWaypointNoseForward. Returns -1 if telemetry hasn't reported it yet.
+     */
+    int get_waypoint_seq();
 
-    // /** 
-    //  * @brief Check if a commanded waypoint has been reached.
-    //  * @param seq
-    //  */
-    // // boost::json::object is_waypoint_reached(int seq);
+    /** 
+     * @brief Check if a commanded waypoint has been reached.
+     * @param seq
+     */
+    bool is_waypoint_reached(int seq);
     
-    // /// @brief Check if an intermediary waypoint has been reached.
-    // boost::json::object is_intermediary_waypoint_reached();
+    /// @brief Check if an intermediary waypoint has been reached.
+    bool is_intermediary_waypoint_reached();
     
-    // /// @brief Id of the gotoYaw command the streamed 'yawReached' refers to (-1 if unknown).
-    // boost::json::object get_yaw_seq();
+    /// @brief Id of the gotoYaw command the streamed 'yawReached' refers to (-1 if unknown).
+    int get_yaw_seq();
 
-    // /** 
-    //  * @brief Check if a commanded yaw has been reached.
-    //  *
-    //  * 'yawReached' latches until the next command, so pass the seq returned by
-    //  * requestSendGotoYaw to require the streamed status belongs to that command.
-    //  * seq=None keeps the legacy (race-prone) raw-flag read.
-    //  * 
-    //  * @param seq
-    //  */
-    // // boost::json::object is_yaw_reached(int seq);
+    /** 
+     * @brief Check if a commanded yaw has been reached.
+     *
+     * 'yawReached' latches until the next command, so pass the seq returned by
+     * requestSendGotoYaw to require the streamed status belongs to that command.
+     * seq=None keeps the legacy (race-prone) raw-flag read.
+     * 
+     * @param seq
+     */
+    bool is_yaw_reached(int seq);
 
-    // /// @brief Id of the gotoAltitude command the streamed 'altitudeReached' refers to (-1 if unknown).
-    // boost::json::object get_altitude_seq();
+    /// @brief Id of the gotoAltitude command the streamed 'altitudeReached' refers to (-1 if unknown).
+    int get_altitude_seq();
 
-    // /** 
-    //  * @brief Check if a commanded altitude has been reached.
-    //  *
-    //  * Pass the seq returned by requestSendGotoAltitude to avoid the stale-latch race.
-    //  * seq=None keeps the legacy (race-prone) raw-flag read.
-    //  * @param seq
-    //  */
-    // // boost::json::object is_altitude_reached(int seq);
+    /** 
+     * @brief Check if a commanded altitude has been reached.
+     *
+     * Pass the seq returned by requestSendGotoAltitude to avoid the stale-latch race.
+     * seq=None keeps the legacy (race-prone) raw-flag read.
+     * @param seq
+     */
+    bool is_altitude_reached(int seq);
     
-    // /// @brief Check if the camera is currently recording.
-    // boost::json::object is_camera_recording();
+    /// @brief Check if the camera is currently recording.
+    bool is_camera_recording();
     
-    // /// @brief Check if the home location has been set.
-    // boost::json::object is_home_set();
+    /// @brief Check if the home location has been set.
+    bool is_home_set();
     
-    // /// @brief Get remaining flight time in minutes.
-    // boost::json::object get_remaining_flight_time();
+    /// @brief Get remaining flight time in minutes.
+    int get_remaining_flight_time();
     
-    // /// @brief Get time needed to return home in seconds.
-    // boost::json::object get_time_needed_to_go_home();
+    /// @brief Get time needed to return home in seconds.
+    double get_time_needed_to_go_home();
     
-    // /// @brief Get time needed to land in seconds.
-    // boost::json::object get_time_needed_to_land();
+    /// @brief Get time needed to land in seconds.
+    double get_time_needed_to_land();
     
-    // /// @brief Get total time needed (go home + land) in seconds.
-    // boost::json::object get_total_time();
+    /// @brief Get total time needed (go home + land) in seconds.
+    double get_total_time();
     
-    // /// @brief Get maximum radius the drone can fly and still return home.
-    // boost::json::object get_max_radius_can_fly_and_go_home();
+    /// @brief Get maximum radius the drone can fly and still return home.
+    double get_max_radius_can_fly_and_go_home();
     
-    // /// @brief Get remaining battery charge percentage.
-    // boost::json::object get_remaining_charge();
+    /// @brief Get remaining battery charge percentage.
+    int get_remaining_charge();
     
-    // /// @brief Get battery percentage needed to land.
-    // boost::json::object get_battery_needed_to_land();
+    /// @brief Get battery percentage needed to land.
+    double get_battery_needed_to_land();
     
-    // /// @brief Get battery percentage needed to return home.
-    // boost::json::object get_battery_needed_to_go_home();
+    /// @brief Get battery percentage needed to return home.
+    double get_battery_needed_to_go_home();
     
-    // /// @brief Get serious low battery warning threshold percentage.
-    // boost::json::object get_serious_low_battery_threshold();
+    /// @brief Get serious low battery warning threshold percentage.
+    double get_serious_low_battery_threshold();
     
-    // /// @brief Get low battery warning threshold percentage.
-    // boost::json::object get_low_battery_threshold();
+    /// @brief Get low battery warning threshold percentage.
+    double get_low_battery_threshold();
     
-    // /// @brief Get the current flight mode (e.g., 'MANUAL', 'GPS', 'GO_HOME', etc.).
-    // boost::json::object get_flight_mode();
+    /// @brief Get the current flight mode (e.g., 'MANUAL', 'GPS', 'GO_HOME', etc.).
+    std::string get_flight_mode();
 
-    // /** @brief Check if manual override is active (pilot took RC control).
-    //  *
-    //  * When True, autonomous HTTP commands are being rejected by the app.
-    //  * The pilot must deactivate manual override before autonomous commands work again.
-    //  */
-    // boost::json::object is_manual_override_active();
+    /** @brief Check if manual override is active (pilot took RC control).
+     *
+     * When True, autonomous HTTP commands are being rejected by the app.
+     * The pilot must deactivate manual override before autonomous commands work again.
+     */
+    bool is_manual_override_active();
 
 protected:
     /**

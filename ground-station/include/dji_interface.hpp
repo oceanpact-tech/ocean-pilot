@@ -83,6 +83,32 @@ public:
     inline double      get_zoom_ratio()             { return this->telemetry_client_.get_zoom_ratio(); }
     inline int         get_battery_level()          { return this->telemetry_client_.get_battery_level(); }
     inline int         get_satellite_count()        { return this->telemetry_client_.get_satellite_count(); }
+    inline bool        is_ready_to_takeoff()                { return this->telemetry_client_.is_ready_to_takeoff(); }
+    inline std::string get_takeoff_block_reason()           { return this->telemetry_client_.get_takeoff_block_reason(); }
+    inline Location2D  get_home_location()                  { return this->telemetry_client_.get_home_location(); }
+    inline double      get_distance_to_home()               { return this->telemetry_client_.get_distance_to_home(); }
+    inline Location3D  get_lrf_target()                     { return this->telemetry_client_.get_lrf_target(); }
+    inline int         get_waypoint_seq()                   { return this->telemetry_client_.get_waypoint_seq(); }
+    inline bool        is_waypoint_reached(int seq)         { return this->telemetry_client_.is_waypoint_reached(seq); }
+    inline bool        is_intermediary_waypoint_reached()   { return this->telemetry_client_.is_intermediary_waypoint_reached(); }
+    inline int         get_yaw_seq()                        { return this->telemetry_client_.get_yaw_seq(); }
+    inline bool        is_yaw_reached(int seq)              { return this->telemetry_client_.is_yaw_reached(seq); }
+    inline int         get_altitude_seq()                   { return this->telemetry_client_.get_altitude_seq(); }
+    inline bool        is_altitude_reached(int seq)         { return this->telemetry_client_.is_altitude_reached(seq); }
+    inline bool        is_camera_recording()                { return this->telemetry_client_.is_camera_recording(); }
+    inline bool        is_home_set()                        { return this->telemetry_client_.is_home_set(); }
+    inline int         get_remaining_flight_time()          { return this->telemetry_client_.get_remaining_flight_time(); }
+    inline double      get_time_needed_to_go_home()         { return this->telemetry_client_.get_time_needed_to_go_home(); }
+    inline double      get_time_needed_to_land()            { return this->telemetry_client_.get_time_needed_to_land(); }
+    inline double      get_total_time()                     { return this->telemetry_client_.get_total_time(); }
+    inline double      get_max_radius_can_fly_and_go_home() { return this->telemetry_client_.get_max_radius_can_fly_and_go_home(); }
+    inline int         get_remaining_charge()               { return this->telemetry_client_.get_remaining_charge(); }
+    inline double      get_battery_needed_to_land()         { return this->telemetry_client_.get_battery_needed_to_land(); }
+    inline double      get_battery_needed_to_go_home()      { return this->telemetry_client_.get_battery_needed_to_go_home(); }
+    inline double      get_serious_low_battery_threshold()  { return this->telemetry_client_.get_serious_low_battery_threshold(); }
+    inline double      get_low_battery_threshold()          { return this->telemetry_client_.get_low_battery_threshold(); }
+    inline std::string get_flight_mode()                    { return this->telemetry_client_.get_flight_mode(); }
+    inline bool        is_manual_override_active()          { return this->telemetry_client_.is_manual_override_active(); }
 
 
 private:

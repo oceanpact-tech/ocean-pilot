@@ -62,8 +62,8 @@ set(MAIN_SOURCE_FILES
     src/telemetry_handler.cpp
     src/transport/tcp_handler.cpp
 )
-# add_executable(${PROJECT_NAME} ${MAIN_SOURCE_FILES})
-#target_link_libraries(${PROJECT_NAME} PRIVATE core_settings)
+add_executable(${PROJECT_NAME} ${MAIN_SOURCE_FILES})
+target_link_libraries(${PROJECT_NAME} PRIVATE core_settings)
 
 # Tests
 set(TEST_SOURCE_FILES

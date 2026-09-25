@@ -19,6 +19,7 @@
 
 #include <boost/asio/io_context.hpp>
 #include <boost/asio/executor_work_guard.hpp>
+#include <boost/asio/signal_set.hpp>
 
 
 /* Aliases -------------------------------------------------------------------*/
@@ -34,63 +35,38 @@ int main(int argc, char* argv[]) {
     net::io_context ioc;
     auto work_guard = net::make_work_guard(ioc);
 
-    // Passa o maestro para a interface se conectar
+    // Connect to the drone using the DJIInterface
     DJIInterface dji(ioc, "192.168.228.24");
+    std::cout << "[DEBUG] Drone connected.\n";
 
-    std::cout << "Conectado! Enviando comando de teste..." << std::endl;
+    // Set up signal handling for graceful shutdown
+    net::signal_set signals(ioc, SIGINT, SIGTERM);
 
-    // Dispara a requisição e passa uma função lambda como callback
-    // dji.request_takeoff([]() {
-    //     std::cout << "Callback executado internamente pela corrotina!" << std::endl;
-    // });
+    // Book closing coroutine
+    signals.async_wait([&](const boost::system::error_code& error, int signal_number) {
+        if (!error) 
+        {
+            std::cout << "\n[System] Interruption detected (Signal " << signal_number << ").\n";
+            std::cout << "[Sistema] Starting graceful shutdown sequence...\n";
+            
+            // Stop telemetry stream and clean up
+            dji.stop_telemetry_stream();
+            work_guard.reset(); 
+            ioc.stop();
+        }
+    });
 
     // Run the IO service in background.
     std::thread asio_thread([&ioc]() {
         ioc.run();
     });
-
-    std::cout << "[Main] Sistema iniciado. Conectando telemetria..." << std::endl;
+    std::cout << "[DEBUG] System initialized.\n";
 
     dji.start_telemetry_stream();
+    std::cout << "[DEBUG] Telemetry stream started.\n";
 
-    // Espera 1 segundo para o socket TCP estabilizar e receber os primeiros JSONs
-    std::this_thread::sleep_for(std::chrono::seconds(1));
+    asio_thread.join(); // Wait for the Asio thread to finish
 
-    // 3. Exemplo de co_spawn em tempo de execução!
-    // Simulando um evento que acabou de chegar do piloto:
-    // std::cout << "[Main] Comando do piloto recebido. Solicitando Takeoff..." << std::endl;
-    // dji.request_takeoff([]() {
-    //     // Isso aqui vai executar na thread do Asio quando o HTTP POST terminar
-    //     std::cout << "[Rede] Callback de Takeoff confirmado pelo drone!" << std::endl;
-    // });
-
-    // 4. O seu Loop de Aplicação (Fila de eventos, controle de voo, MAVLink, etc)
-    std::cout << "[Main] Iniciando loop de controle (1 Hz)..." << std::endl;
-    for (int i = 0; i < 5; ++i) {
-        
-        // Acessa a telemetria completa processada pela thread do Asio
-        Vector3D telemetry = dji.get_speed();
-        
-        // ESTE BLOCO NAO É MAIS VALIDO
-        // if (!telemetry.empty()) {
-        //     // O boost::json::serialize converte o objeto JSON de volta para uma string formatada
-        //     std::cout << "[Voo] Telemetria completa: " 
-        //               << boost::json::serialize(telemetry) << std::endl;
-        // } else {
-        //     std::cout << "[Voo] Aguardando dados de telemetria..." << std::endl;
-        // }
-
-        std::this_thread::sleep_for(std::chrono::seconds(1));
-    }
-
-    // 5. Encerramento limpo
-    std::cout << "[Main] Desligando subsistemas..." << std::endl;
-    dji.stop_telemetry_stream();
-
-    work_guard.reset(); // Libera o maestro para encerrar quando a fila esvaziar
-    ioc.stop();         // Força a parada de operações pendentes
-    asio_thread.join(); // Aguarda a thread de rede fechar com segurança
-
-    std::cout << "[Main] Programa encerrado." << std::endl;
+    std::cout << "[DEBUG] Program finished." << std::endl;
     return 0;
 }
