@@ -2,5 +2,6 @@
 
 ground-station/bin/
 ground-station/build/
+ground-station/test/python
 
 tmp/
