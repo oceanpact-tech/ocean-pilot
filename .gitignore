@@ -3,5 +3,8 @@
 ground-station/bin/
 ground-station/build/
 ground-station/test/python
+ground-station/third_party/ros_mavlink_bridge
+
+ocean-pilot-app/third_party
 
 tmp/
