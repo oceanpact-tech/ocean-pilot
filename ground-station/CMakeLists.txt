@@ -15,7 +15,8 @@ set(Boost_NO_SYSTEM_PATHS ON)
 set(CMAKE_BUILD_RPATH "${Boost_ROOT}/stage/lib")
 
 # ----- MAVSDK setup -----
-set(MAVSDK_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/third_party/MAVSDK/cpp/")
+# set(MAVSDK_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/third_party/MAVSDK/cpp/")
+set(MAVSDK_ROOT /home/thiagomarques/Projetos/forks/MAVSDK/cpp/)
 set(MAVSDK_NO_SYSTEM_PATHS ON)
 
 # cmake config 
@@ -29,8 +30,7 @@ list(PREPEND CMAKE_PREFIX_PATH
 # Dependencies
 # ---------------------- 
 
-find_package(Boost REQUIRED CONFIG 
-    COMPONENTS system json) # Make sure to use its own cmake config files
+find_package(Boost REQUIRED CONFIG COMPONENTS system json) # Make sure to use its own cmake config files
 find_package(OpenSSL REQUIRED)
 find_package(MAVSDK REQUIRED)
 find_package(Threads REQUIRED)
@@ -79,11 +79,11 @@ target_link_libraries(mavlink_core INTERFACE
 # Executables
 # ---------------------- 
 
-add_executable(${PROJECT_NAME} src/dji_interface/main.cpp)
-target_link_libraries(${PROJECT_NAME} PRIVATE dji_interface)
+# add_executable(${PROJECT_NAME} src/dji_interface/main.cpp)
+# target_link_libraries(${PROJECT_NAME} PRIVATE dji_interface)
 
-add_executable(${PROJECT_NAME}_test_telemetry test/dji_interface/test_telemetry.cpp)
-target_link_libraries(${PROJECT_NAME}_test_telemetry PRIVATE dji_interface)
+# add_executable(${PROJECT_NAME}_test_telemetry test/dji_interface/test_telemetry.cpp)
+# target_link_libraries(${PROJECT_NAME}_test_telemetry PRIVATE dji_interface)
 
 add_executable(mavlink_bridge_test_telemetry test/mavlink_bridge/test_mavlink.cpp)
 target_link_libraries(mavlink_bridge_test_telemetry PRIVATE mavlink_core)
