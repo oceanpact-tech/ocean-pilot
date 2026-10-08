@@ -50,8 +50,11 @@ public:
     HttpHandler(
         net::io_context& ioc, 
         std::string host, 
-        std::string port)
-        : ioc_(ioc), host_(std::move(host)), port_(std::move(port)) {}
+        std::string port
+    )
+        : ioc_(ioc), 
+          host_(std::move(host)),
+          port_(std::move(port)) {}
 
 
     /**
