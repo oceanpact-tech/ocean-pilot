@@ -1,3 +1,7 @@
+#pragma once
+
+#include <string>
+
 /**
  * @brief Represents a 3D vector for velocities or coordinates.
  */
@@ -31,4 +35,14 @@ struct Location3D {
 struct Location2D {
     double latitude = 0.0;
     double longitude = 0.0;
+};
+
+
+/**
+ * @brief Network params to connect.
+ */
+struct WildBridgeSocketConfig {
+    std::string ip;
+    std::string command_port;
+    std::string telemetry_port;
 };
