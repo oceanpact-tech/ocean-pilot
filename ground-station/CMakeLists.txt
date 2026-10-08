@@ -15,8 +15,8 @@ set(Boost_NO_SYSTEM_PATHS ON)
 set(CMAKE_BUILD_RPATH "${Boost_ROOT}/stage/lib")
 
 # ----- MAVSDK setup -----
-# set(MAVSDK_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/third_party/MAVSDK/cpp/")
-set(MAVSDK_ROOT /home/thiagomarques/Projetos/forks/MAVSDK/cpp/)
+set(MAVSDK_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/third_party/MAVSDK/cpp/")
+# set(MAVSDK_ROOT /home/thiagomarques/Projetos/forks/MAVSDK/cpp/)
 set(MAVSDK_NO_SYSTEM_PATHS ON)
 
 # cmake config 
@@ -56,17 +56,7 @@ target_link_libraries(core_settings INTERFACE
     OpenSSL::Crypto
     pthread
 )
-
-# ----- dji_interface -----
-add_library(dji_interface STATIC
-    src/dji_interface/dji_interface.cpp
-    src/dji_interface/telemetry_handler.cpp
-    src/dji_interface/transport/http_handler.cpp
-    src/dji_interface/transport/tcp_handler.cpp    
-)
-target_include_directories(dji_interface PUBLIC include/dji_interface)
-target_link_libraries(dji_interface PUBLIC core_settings)
-
+ 
 # ----- Mavlink -----
 add_library(mavlink_core INTERFACE)
 target_link_libraries(mavlink_core INTERFACE
@@ -74,6 +64,30 @@ target_link_libraries(mavlink_core INTERFACE
     MAVSDK::mavsdk
     Threads::Threads
 )
+
+# ----- dji_interface -----
+add_library(dji_interface STATIC
+    # src/dji_interface/dji_interface.cpp
+    src/dji_interface/telemetry_receiver.cpp
+    src/dji_interface/dji_commander.cpp
+    src/dji_interface/transport/http_handler.cpp
+    src/dji_interface/transport/tcp_handler.cpp    
+)
+target_include_directories(dji_interface PUBLIC include/dji_interface)
+target_link_libraries(dji_interface PUBLIC core_settings)
+
+# ----- mavlink_bridge -----
+add_library(mavlink_bridge STATIC
+    src/mavlink_bridge/mavlink_bridge.cpp
+)
+target_include_directories(mavlink_bridge PUBLIC include/mavlink_bridge)
+target_link_libraries(mavlink_bridge 
+    PUBLIC 
+        core_settings
+        mavlink_core
+        dji_interface
+)
+
 
 # ---------------------- 
 # Executables
@@ -85,5 +99,6 @@ target_link_libraries(mavlink_core INTERFACE
 # add_executable(${PROJECT_NAME}_test_telemetry test/dji_interface/test_telemetry.cpp)
 # target_link_libraries(${PROJECT_NAME}_test_telemetry PRIVATE dji_interface)
 
-add_executable(mavlink_bridge_test_telemetry test/mavlink_bridge/test_mavlink.cpp)
-target_link_libraries(mavlink_bridge_test_telemetry PRIVATE mavlink_core)
+# add_executable(mavlink_bridge_test_telemetry test/mavlink_bridge/test_mavlink.cpp)
+add_executable(mavlink_bridge_test_telemetry test/mavlink_bridge/main.cpp)
+target_link_libraries(mavlink_bridge_test_telemetry PRIVATE mavlink_bridge)
