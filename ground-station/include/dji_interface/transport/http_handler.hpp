@@ -65,9 +65,9 @@ public:
      * @param on_complete A callback function to be called when the request is complete.
      */
     void post_async(
-        const std::string endpoint, 
-        const std::string payload,
-        std::function<void()> on_complete = nullptr);
+        std::string endpoint, 
+        std::string payload,
+        std::function<void(bool)> on_complete = nullptr);
 
     /**
      * @brief Internal coroutine that executes the POST request asynchronously.
@@ -80,7 +80,7 @@ public:
     net::awaitable<void> do_post(
         std::string endpoint, 
         std::string payload, 
-        std::function<void()> on_complete);
+        std::function<void(bool)> on_complete);
     
 
 private:
