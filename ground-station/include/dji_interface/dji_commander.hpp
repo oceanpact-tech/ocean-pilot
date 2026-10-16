@@ -57,21 +57,30 @@ public:
      */
     ~DJICommander() = default;
 
-
-    /** @brief Requests the drone to take off
-     *  @param on_complete Optional callback function to be executed after the takeoff request is processed.
+    /**
+     * @brief Requests the drone to take off.
+     * @param on_complete Optional callback function to be executed after the request is processed.
      */
-    void request_takeoff(std::function<void()> on_complete = []() {});
+    void request_takeoff(std::function<void(bool)> on_complete = nullptr);
 
-    /** @brief Requests the drone to take off
-     *  @param on_complete Optional callback function to be executed after the takeoff request is processed.
+    /**
+     * @brief Requests the drone to land.
+     * @param on_complete Optional callback function to be executed after the request is processed.
      */
-    void request_arm(std::function<void()> on_complete = []() {});
+    void request_land(std::function<void(bool)> on_complete = nullptr);
 
-    /** @brief Requests the drone to disarm
-     *  @param on_complete Optional callback function to be executed after the disarm request is processed.
+    /**
+     * @brief Requests the drone to enable virtual stick.
+     * @param on_complete Optional callback function to be executed after the request is processed.
      */
-    void request_disarm(std::function<void()> on_complete = []() {});
+    void enable_virtual_stick(std::function<void(bool)> on_complete = nullptr);
+
+    /**
+     * @brief Send virtual stick.
+     * @param on_complete Optional callback function to be executed after the request is processed.
+     * @param payload "leftX,leftY,rightX,rightY". Each stick value should be in the interval [-1,1].
+     */
+    void send_stick(std::string payload, std::function<void(bool)> on_complete = nullptr);
 
 
 private:
