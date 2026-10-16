@@ -113,7 +113,7 @@ public:
     inline std::string get_drone_status()                   { return this->telemetry_client_.get_drone_status(); }
     inline std::string get_flight_mode()                    { return this->telemetry_client_.get_flight_mode(); }
     inline bool        is_manual_override_active()          { return this->telemetry_client_.is_manual_override_active(); }
-
+    inline bool        is_virtual_stick_enabled()           { return this->telemetry_client_.is_virtual_stick_enabled(); }
 
 private:
     TelemetryReceiver telemetry_client_;

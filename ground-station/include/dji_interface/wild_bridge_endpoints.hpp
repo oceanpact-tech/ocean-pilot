@@ -29,7 +29,7 @@ namespace endpoints
      */
     namespace post 
     {
-        // constexpr std::string_view STICK = "/send/stick";  // expects a formatted string: "<leftX>,<leftY>,<rightX>,<rightY>"
+        constexpr std::string_view STICK = "/send/stick";  // expects a formatted string: "<leftX>,<leftY>,<rightX>,<rightY>"
         // constexpr std::string_view ZOOM = "/send/camera/zoom";
         // constexpr std::string_view GIMBAL_SET_PITCH = "/send/gimbal/pitch";
         // constexpr std::string_view GIMBAL_SET_YAW = "/send/gimbal/yaw";  // !!! This is the yaw joint angle !!!
@@ -38,9 +38,9 @@ namespace endpoints
         constexpr std::string_view ARM = "/send/arm";
         constexpr std::string_view DISARM = "/send/disarm";
         constexpr std::string_view TAKEOFF = "/send/takeoff";
-        // constexpr std::string_view LAND = "/send/land";
+        constexpr std::string_view LAND = "/send/land";
         // constexpr std::string_view RTH = "/send/RTH";
-        // constexpr std::string_view ENABLE_VIRTUAL_STICK = "/send/enableVirtualStick";
+        constexpr std::string_view ENABLE_VIRTUAL_STICK = "/send/enableVirtualStick";
         // constexpr std::string_view ABORT_MISSION = "/send/abortMission";
         // constexpr std::string_view ABORT_ALL = "/send/abortAll";
         // constexpr std::string_view GOTO_YAW = "/send/gotoYaw";
