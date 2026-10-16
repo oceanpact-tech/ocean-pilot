@@ -549,6 +549,15 @@ bool TelemetryReceiver::is_manual_override_active()
     return false; // Default if not available
 }
 
+bool TelemetryReceiver::is_virtual_stick_enabled() 
+{
+    std::lock_guard<std::mutex> lock(this->telemetry_mtx_);
+    const auto& telemetry = this->latest_telemetry_;
+    if (telemetry.contains("isVirtualStickActive") && telemetry.at("isVirtualStickActive").is_bool())
+        return telemetry.at("isVirtualStickActive").as_bool();
+    return false; // Default if not available
+}
+
 
 /* Protected Class Methods ---------------------------------------------------*/
 

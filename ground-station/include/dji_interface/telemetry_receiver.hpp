@@ -221,6 +221,9 @@ public:
      */
     bool is_manual_override_active();
 
+    /// @brief Check if virtual stick is enabled.
+    bool is_virtual_stick_enabled();
+
 protected:
     /**
      * @brief Overrides the base class hook to parse the NDJSON.
