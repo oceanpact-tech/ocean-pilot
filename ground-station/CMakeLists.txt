@@ -16,7 +16,6 @@ set(CMAKE_BUILD_RPATH "${Boost_ROOT}/stage/lib")
 
 # ----- MAVSDK setup -----
 set(MAVSDK_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/third_party/MAVSDK/cpp/")
-# set(MAVSDK_ROOT /home/thiagomarques/Projetos/forks/MAVSDK/cpp/)
 set(MAVSDK_NO_SYSTEM_PATHS ON)
 
 # cmake config 

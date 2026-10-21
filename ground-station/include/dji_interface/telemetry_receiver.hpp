@@ -122,6 +122,9 @@ public:
 
     /// @brief Get home location (latitude, longitude).
     Location2D get_home_location();
+
+    /// @brief Get home altitude.
+    double get_home_altitude();
     
     /// @brief Get distance to home in meters.
     double get_distance_to_home();

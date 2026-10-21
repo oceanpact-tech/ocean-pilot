@@ -89,6 +89,7 @@ public:
     inline bool        is_ready_to_takeoff()                { return this->telemetry_client_.is_ready_to_takeoff(); }
     inline std::string get_takeoff_block_reason()           { return this->telemetry_client_.get_takeoff_block_reason(); }
     inline Location2D  get_home_location()                  { return this->telemetry_client_.get_home_location(); }
+    inline double      get_home_altitude()                  { return this->telemetry_client_.get_home_altitude(); }
     inline double      get_distance_to_home()               { return this->telemetry_client_.get_distance_to_home(); }
     inline Location3D  get_lrf_target()                     { return this->telemetry_client_.get_lrf_target(); }
     inline int         get_waypoint_seq()                   { return this->telemetry_client_.get_waypoint_seq(); }

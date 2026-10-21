@@ -28,7 +28,12 @@ void DJICommander::request_land(std::function<void(bool)> on_complete)
 
 void DJICommander::enable_virtual_stick(std::function<void(bool)> on_complete) 
 {
-    this->http_client_.post_async(std::string(endpoints::post::ENABLE_VIRTUAL_STICK), "", on_complete);
+    this->http_client_.post_async(std::string(endpoints::post::ENABLE_VIRTUAL_STICK), "true", on_complete);
+}
+
+void DJICommander::disable_virtual_stick(std::function<void(bool)> on_complete) 
+{
+    this->http_client_.post_async(std::string(endpoints::post::ENABLE_VIRTUAL_STICK), "false", on_complete);
 }
 
 void DJICommander::send_stick(std::string payload, std::function<void(bool)> on_complete) 

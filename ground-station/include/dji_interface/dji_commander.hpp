@@ -76,6 +76,12 @@ public:
     void enable_virtual_stick(std::function<void(bool)> on_complete = nullptr);
 
     /**
+     * @brief Requests the drone to disable virtual stick.
+     * @param on_complete Optional callback function to be executed after the request is processed.
+     */
+    void disable_virtual_stick(std::function<void(bool)> on_complete = nullptr);
+
+    /**
      * @brief Send virtual stick.
      * @param on_complete Optional callback function to be executed after the request is processed.
      * @param payload "leftX,leftY,rightX,rightY". Each stick value should be in the interval [-1,1].

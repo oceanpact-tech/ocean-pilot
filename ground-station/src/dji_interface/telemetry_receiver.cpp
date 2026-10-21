@@ -260,6 +260,15 @@ Location2D TelemetryReceiver::get_home_location()
     return location; 
 }
 
+double TelemetryReceiver::get_home_altitude() 
+{
+    std::lock_guard<std::mutex> lock(this->telemetry_mtx_);
+    const auto& telemetry = this->latest_telemetry_;
+    if (telemetry.contains("homeAltitude") && telemetry.at("homeAltitude").is_double())
+        return boost::json::value_to<double>(telemetry.at("homeAltitude"));
+    return 0.0; // Default if not available
+}
+
 double TelemetryReceiver::get_distance_to_home() 
 {
     std::lock_guard<std::mutex> lock(this->telemetry_mtx_);

@@ -16,7 +16,7 @@
 
 /* Defines -------------------------------------------------------------------*/
 
-#define SIMULATION_MODE 1 // 1 = Simulation mode (localhost), 0 = Real drone (
+#define SIMULATION_MODE 0 // 1 = Simulation mode (localhost), 0 = Real drone (
 
 
 /* Aliases -------------------------------------------------------------------*/
@@ -33,8 +33,11 @@ int main(int argc, char *argv[])
     net::io_context ioc;
     auto work_guard = net::make_work_guard(ioc);
 
-    // Connect to the drone using the DJIInterface
-    std::string drone_ip = SIMULATION_MODE ? "0.0.0.0" : "192.168.228.24";
+    std::string drone_ip = "0.0.0.0";
+    if (argc < 3)
+        drone_ip = argv[1];
+
+    std::cout << "DRONE IP: " <<  drone_ip << "\n";
 
     WildBridgeSocketConfig wildbridge_socket = {
         .ip = drone_ip,

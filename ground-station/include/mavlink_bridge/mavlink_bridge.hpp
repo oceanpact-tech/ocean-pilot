@@ -139,13 +139,15 @@ private:
     std::thread telemetry_thread_;                  ///< Thread for sending telemetry.
 
     // Raw buffers for telemetry
-    Location3D raw_location_buffer_; ///< Raw location data from DJIInterface.
-    Speed3D    raw_speed_buffer_;    ///< Raw speed data from DJIInterface.
-    double     raw_heading_buffer_;  ///< Raw heading data from DJIInterface.
-    Attitude3D raw_attitude_buffer_; ///< Raw attitude data from DJIInterface.
-
+    Location2D raw_home_location_buffer; ///< Raw home location 2D data from DJIInterface.
+    double     raw_home_altitude_buffer; ///< Raw home location altitude data from DJIInterface.
+    Location3D raw_location_buffer_;     ///< Raw location data from DJIInterface.
+    Speed3D    raw_speed_buffer_;        ///< Raw speed data from DJIInterface.
+    double     raw_heading_buffer_;      ///< Raw heading data from DJIInterface.
+    Attitude3D raw_attitude_buffer_;     ///< Raw attitude data from DJIInterface.
 
     // Buffers for telemetry
+    mavsdk::TelemetryServer::Position            home_location_buffer_;    ///< Buffer for home location telemetry.
     mavsdk::TelemetryServer::Position            position_buffer_;         ///< Buffer for position telemetry.
     mavsdk::TelemetryServer::VelocityNed         velocity_buffer_;         ///< Buffer for velocity telemetry.                   
     mavsdk::TelemetryServer::Heading             heading_buffer_;          ///< Buffer for heading  telemetry.
@@ -187,10 +189,12 @@ private:
     };
     
     std::atomic<bool> should_virtual_stick_be_enabled_{false};
+
+    std::atomic<bool> is_armed_{false};
     std::atomic<bool> is_virtual_stick_enabling_{false};
     std::atomic<bool> is_virtual_stick_enabled_{false};
-    std::atomic<bool> is_on_takeoff{false};
-    std::atomic<bool> is_on_land{false};
+    std::atomic<bool> is_on_takeoff_{false};
+    std::atomic<bool> is_on_land_{false};
 
     /// @brief Creates and prepares the MAVSDK configuration.
     inline static mavsdk::ActionServer::AllowableFlightModes create_allawable_fligh_modes_config() 
@@ -201,8 +205,8 @@ private:
         allowed_modes.can_stabilize_mode    = true;
         allowed_modes.can_auto_land_mode    = true;
         allowed_modes.can_auto_takeoff_mode = true;
-        allowed_modes.can_auto_rtl_mode     = false;
-        allowed_modes.can_auto_loiter_mode  = false;
+        allowed_modes.can_auto_rtl_mode     = true;
+        allowed_modes.can_auto_loiter_mode  = true;
         return allowed_modes;
     };
 
@@ -255,13 +259,15 @@ private:
 
     bool on_manual_control(mavsdk::Mavsdk::MavlinkMessage msg);
 
-    // --------------------------
-    // HELPERS
-    // --------------------------
+    bool on_command_ack_outgoing_message(mavsdk::Mavsdk::MavlinkMessage msg);
 
-    /// @brief Create a formatted mavlink message to be send as COMMAND_ACK.
-    mavsdk::MavlinkDirectServer::MavlinkMessage create_ack_mavlink_msg(uint16_t command, uint8_t resul);
+    // // --------------------------
+    // // HELPERS
+    // // --------------------------
 
-    /// @brief Get the value for a specific key from json string.
-    std::optional<std::string> extract_json_value(const std::string& json_str, const std::string& key);
+    // /// @brief Create a formatted mavlink message to be send as COMMAND_ACK.
+    // mavsdk::MavlinkDirectServer::MavlinkMessage create_ack_mavlink_msg(uint16_t command, uint8_t resul);
+
+    // /// @brief Get the value for a specific key from json string.
+    // std::optional<std::string> extract_json_value(const std::string& json_str, const std::string& key);
 };

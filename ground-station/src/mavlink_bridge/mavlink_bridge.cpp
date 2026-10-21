@@ -27,6 +27,20 @@
 #include "mavlink_bridge/custom_types/mav_land_state.hpp"
 
 
+/* Aliases -------------------------------------------------------------------*/
+
+using MavlinkMessage = mavsdk::Mavsdk::MavlinkMessage;
+using DirectMavlinkMessage = mavsdk::MavlinkDirectServer::MavlinkMessage;
+using Result = mavsdk::ActionServer::Result;
+using FlightMode = mavsdk::ActionServer::FlightMode;
+
+
+/* Prototypes ----------------------------------------------------------------*/
+
+DirectMavlinkMessage create_ack_mavlink_msg(uint16_t command, uint8_t result);
+std::optional<std::string> extract_json_value(const std::string& json_str, const std::string& key);
+
+
 /* Public Class Methods ------------------------------------------------------*/
 
 MavlinkBridge::MavlinkBridge(
@@ -55,9 +69,10 @@ bool MavlinkBridge::start()
 {
     // Action server setup
     this->action_server_.set_allowable_flight_modes(this->create_allawable_fligh_modes_config());
-    this->action_server_.set_armable(false, false);     // Set armable = false and force_arm = false. This avoid heartbeat be updated by ActionServer.
-    this->action_server_.set_disarmable(false, false);  // Set disarmable = false and force_disarm = false.
-    this->action_server_.set_flight_mode(mavsdk::ActionServer::FlightMode::Hold); // Set current flight mode
+    this->action_server_.set_allow_takeoff(false);
+    this->action_server_.set_armable(true, true);    
+    this->action_server_.set_disarmable(true, true);  
+    this->action_server_.set_flight_mode(FlightMode::Hold); // Set current flight mode
 
     // Load parameters
     this->load_params(oceanpilot::Params::int_params);
@@ -82,42 +97,37 @@ bool MavlinkBridge::start()
 
     // Outgoing messages
     this->mavsdk_.subscribe_outgoing_messages_json(
-        [this](mavsdk::Mavsdk::MavlinkMessage msg) -> bool {
+        [this](MavlinkMessage msg) -> bool {
             return this->on_outgoing_message(msg);
         }
     );
 
     // Incoming messages
     this->mavsdk_.subscribe_incoming_messages_json(
-        [this](mavsdk::Mavsdk::MavlinkMessage msg) -> bool {
+        [this](MavlinkMessage msg) -> bool {
             return this->on_incoming_message(msg);
         }
     );
 
     // Arm/Disarm action
     this->action_server_.subscribe_arm_disarm(
-        [this](mavsdk::ActionServer::Result result, mavsdk::ActionServer::ArmDisarm command) {
+        [this](Result result, mavsdk::ActionServer::ArmDisarm command) {
             return this->on_arm_disarm_command(result, command);
         }
     );
 
     // Takeoff
     this->action_server_.subscribe_takeoff(
-        [this](mavsdk::ActionServer::Result result, bool clear_all) {
+        [this](Result result, bool clear_all) {
             return this->on_takeoff(result, clear_all);
         }
     );
 
-    // Land
-    this->action_server_.subscribe_land(
-        [this](mavsdk::ActionServer::Result result, bool clear_all) {
-            return this->on_land(result, clear_all);
-        }
-    );
+    // Land action required by ground station engage subscribe_flight_mode_change callback.
 
     // Mode change
     this->action_server_.subscribe_flight_mode_change(
-        [this](mavsdk::ActionServer::Result result, mavsdk::ActionServer::FlightMode mode) {
+        [this](Result result, FlightMode mode) {
             return this->on_flight_mode_change(mode);
         }
     );
@@ -181,19 +191,27 @@ void MavlinkBridge::schedule_telemetry()
 
 void MavlinkBridge::get_raw_telemetry() 
 {
-    this->raw_location_buffer_ = this->dji_.get_location();
-    this->raw_speed_buffer_    = this->dji_.get_speed();
-    this->raw_heading_buffer_  = this->dji_.get_heading();
-    this->raw_attitude_buffer_ = this->dji_.get_attitude(); 
+    this->raw_home_location_buffer = this->dji_.get_home_location();
+    this->raw_home_altitude_buffer = this->dji_.get_home_altitude();
+    this->raw_location_buffer_     = this->dji_.get_location();
+    this->raw_speed_buffer_        = this->dji_.get_speed();
+    this->raw_heading_buffer_      = this->dji_.get_heading();
+    this->raw_attitude_buffer_     = this->dji_.get_attitude(); 
 }
 
 void MavlinkBridge::prepare_mavlink_telemetry()
 {    
+    // Home location 
+    this->home_location_buffer_.latitude_deg        = this->raw_home_location_buffer.latitude;
+    this->home_location_buffer_.longitude_deg       = this->raw_home_location_buffer.longitude;
+    this->home_location_buffer_.absolute_altitude_m = this->raw_home_altitude_buffer;
+    this->home_location_buffer_.relative_altitude_m = 0.0;
+
     // Position
     this->position_buffer_.latitude_deg        = this->raw_location_buffer_.latitude;
     this->position_buffer_.longitude_deg       = this->raw_location_buffer_.longitude;
     this->position_buffer_.absolute_altitude_m = this->raw_location_buffer_.altitude;
-    this->position_buffer_.relative_altitude_m = this->raw_location_buffer_.altitude;
+    this->position_buffer_.relative_altitude_m = this->raw_location_buffer_.altitude + this->raw_home_altitude_buffer;
 
     // Speed
     this->velocity_buffer_.north_m_s = this->raw_speed_buffer_.x;
@@ -203,12 +221,21 @@ void MavlinkBridge::prepare_mavlink_telemetry()
     // Heading
     this->heading_buffer_.heading_deg = this->raw_heading_buffer_;
 
+    // Attitude
+    this->attitude_buffer_.roll_deg  = this->raw_attitude_buffer_.roll;
+    this->attitude_buffer_.pitch_deg = this->raw_attitude_buffer_.pitch;
+    this->attitude_buffer_.yaw_deg   = this->raw_attitude_buffer_.yaw;
+
     // Angular velocity
     // TODO
 }
 
 void MavlinkBridge::publish_telemetry()
 {
+    this->telemetry_server_.publish_home(
+        this->home_location_buffer_
+    );
+
     this->telemetry_server_.publish_position(
         this->position_buffer_,
         this->velocity_buffer_,
@@ -226,16 +253,16 @@ void MavlinkBridge::publish_heartbeat()
     // Update arming state
     this->action_server_.set_armed_state(this->dji_.is_armed());
 
-    mavsdk::ActionServer::FlightMode target_mode = mavsdk::ActionServer::FlightMode::Hold;
-    if (this->is_on_takeoff)
-        target_mode = mavsdk::ActionServer::FlightMode::Takeoff;
-    else if (this->is_on_land)
-        target_mode = mavsdk::ActionServer::FlightMode::Land;
+    FlightMode target_mode = FlightMode::Hold;
+    if (this->is_on_takeoff_)
+        target_mode = FlightMode::Takeoff;
+    else if (this->is_on_land_)
+        target_mode = FlightMode::Land;
     else if (this->should_virtual_stick_be_enabled_ || 
              (this->is_virtual_stick_enabled_ && this->dji_.is_armed()))
-        target_mode = mavsdk::ActionServer::FlightMode::Posctl;
+        target_mode = FlightMode::Posctl;
 
-    static mavsdk::ActionServer::FlightMode current_mode = mavsdk::ActionServer::FlightMode::Unknown;
+    static FlightMode current_mode = FlightMode::Unknown;
 
     // Update flight mode
     if (current_mode != target_mode)
@@ -300,21 +327,29 @@ void MavlinkBridge::maintain_virtual_stick()
 {
     // Update inner state
     bool is_virtual_stick_enabled = this->dji_.is_virtual_stick_enabled();
+    bool is_armed = this->dji_.is_armed();
+
     this->is_virtual_stick_enabled_ = is_virtual_stick_enabled;
+    this->is_armed_ = is_armed;
 
     // If pilot takes the control back, take POSITION mode down and go back to HOLD
     if (this->dji_.is_manual_override_active())
     {
         this->should_virtual_stick_be_enabled_ = false;
-        this->previous_flight_mode_ = mavsdk::ActionServer::FlightMode::Hold;
+        this->previous_flight_mode_ = FlightMode::Hold;
         return;
     }
 
+    // Disable virtual stick
     if (!this->should_virtual_stick_be_enabled_ || 
-        !this->dji_.is_armed()                  ||
-        this->is_on_takeoff                     ||
-        this->is_on_land)
+        !is_armed                               ||
+        this->is_on_takeoff_                    ||
+        this->is_on_land_)
+    {
+        if (is_virtual_stick_enabled)
+            this->dji_.disable_virtual_stick();
         return;
+    }
 
     if (!is_virtual_stick_enabled)
     {
@@ -328,19 +363,12 @@ void MavlinkBridge::maintain_virtual_stick()
             this->is_virtual_stick_enabling_ = true;
             last_attempt = now;
 
-            std::thread([this]() 
-            {
-                this->dji_.enable_virtual_stick();
-                std::cout << "Trying to ENABLE VIRTUAL STICK\n";
+            this->dji_.enable_virtual_stick([this](bool success) {
                 this->is_virtual_stick_enabling_ = false;
-            }).detach();
-
-            // this->dji_.enable_virtual_stick([this](bool success) {
-            //     this->is_virtual_stick_enabling_ = false;
-            //     if (!success) {
-            //         std::cerr << "[MavlinkBridge] Falha HTTP ao enviar enableVirtualStick\n";
-            //     }
-            // });
+                if (!success) {
+                    std::cerr << "[MavlinkBridge] Falha HTTP ao enviar enableVirtualStick\n";
+                }
+            });
         }     
     }
 }
@@ -349,68 +377,97 @@ void MavlinkBridge::maintain_virtual_stick()
 // SUBSCRIBERS
 // --------------------------
 
-bool MavlinkBridge::on_outgoing_message(mavsdk::Mavsdk::MavlinkMessage msg)
+bool MavlinkBridge::on_outgoing_message(MavlinkMessage msg)
 {
     if (msg.message_name == "COMMAND_ACK")
-    {
-        std::optional<std::string> command = this->extract_json_value(msg.fields_json, "command");
-        
-        std::string arm_disarm_code = std::to_string(MavCmd::MAV_CMD_COMPONENT_ARM_DISARM);
-        std::string takeoff_code    = std::to_string(MavCmd::MAV_CMD_NAV_TAKEOFF);
-        std::string land_code    = std::to_string(MavCmd::MAV_CMD_NAV_LAND);
+        this->on_command_ack_outgoing_message(msg);
 
-        if (command == std::nullopt)
-            return false;
-
-        if (command == arm_disarm_code ||
-            command == takeoff_code    ||
-            command == land_code)
-        {
-            std::optional<std::string> result_param2 = this->extract_json_value(msg.fields_json, "result_param2");
-            if(result_param2 == "999")
-                return true;
-            return false;
-        }
-    }
-    return true;
+    return true; // Allow any other message
 }
 
-bool MavlinkBridge::on_incoming_message(mavsdk::Mavsdk::MavlinkMessage msg)
+bool MavlinkBridge::on_incoming_message(MavlinkMessage msg)
 {
+    
     if (msg.message_name == "MANUAL_CONTROL")
     {
         return this->on_manual_control(msg);
     }
+
+    std::cout << msg.fields_json << "\n";
+
     return true;
 }
 
-void MavlinkBridge::on_flight_mode_change(mavsdk::ActionServer::FlightMode mode)
+void MavlinkBridge::on_flight_mode_change(FlightMode mode)
 {
     if (mode == this->previous_flight_mode_)
         return;
 
     switch (mode)
     {
-        case mavsdk::ActionServer::FlightMode::Hold: 
+        case FlightMode::Hold: 
             std::cout << "[MavlinkBridge] MUDAR Modo para: HOLD\n";
-            this->previous_flight_mode_ = mode;
             this->should_virtual_stick_be_enabled_ = false;
+            this->previous_flight_mode_ = mode;
             break;
-        case mavsdk::ActionServer::FlightMode::Posctl:
+
+        case FlightMode::Posctl:
             std::cout << "[MavlinkBridge] MUDAR Modo para: POSITION\n";
             this->previous_flight_mode_ = mode;
             this->should_virtual_stick_be_enabled_ = true;
             break;
-        case mavsdk::ActionServer::FlightMode::Offboard:
+
+        case FlightMode::Land:
+            std::cout << "[MavlinkBridge] MUDAR Modo para: LAND\n";
+            this->on_land(Result::Success, true);
             break;
-        case mavsdk::ActionServer::FlightMode::Manual: 
-            break;
+
+        case FlightMode::Acro:
+            std::cout << "[MavlinkBridge] MUDAR Modo para: ACRO\n";
+            break; 
+
+        case FlightMode::Altctl:
+            std::cout << "[MavlinkBridge] MUDAR Modo para: ALTCTL\n";
+            break; 
+        
+        case FlightMode::FollowMe:
+            std::cout << "[MavlinkBridge] MUDAR Modo para: FOLLOW ME\n";
+            break; 
+
+        case FlightMode::Manual:
+            std::cout << "[MavlinkBridge] MUDAR Modo para: MANUAL\n";
+            break; 
+        
+        case FlightMode::Mission:
+            std::cout << "[MavlinkBridge] MUDAR Modo para: MISSION\n";
+            break; 
+
+        case FlightMode::Offboard:
+            std::cout << "[MavlinkBridge] MUDAR Modo para: OFFBOARD\n";
+            break; 
+
+        case FlightMode::Ready:
+            std::cout << "[MavlinkBridge] MUDAR Modo para: READY\n";
+            break; 
+
+        case FlightMode::ReturnToLaunch:
+            std::cout << "[MavlinkBridge] MUDAR Modo para: RETURN TO LAUNCH\n";
+            break; 
+
+        case FlightMode::Stabilized:
+            std::cout << "[MavlinkBridge] MUDAR Modo para: STABILIZED\n";
+            break; 
+        
+        case FlightMode::Takeoff:
+            std::cout << "[MavlinkBridge] MUDAR Modo para: TAKEOFF\n";
+            break; 
+
         default:
             break;
     }
 }
 
-void MavlinkBridge::on_arm_disarm_command(mavsdk::ActionServer::Result result, mavsdk::ActionServer::ArmDisarm command) 
+void MavlinkBridge::on_arm_disarm_command(Result result, mavsdk::ActionServer::ArmDisarm command) 
 {
     // Command = DISARM
     if (command.arm)
@@ -418,7 +475,7 @@ void MavlinkBridge::on_arm_disarm_command(mavsdk::ActionServer::Result result, m
         if (!this->dji_.is_ready_to_takeoff())
         {
             this->mavlink_direct_server_.send_message(
-                this->create_ack_mavlink_msg(
+                create_ack_mavlink_msg(
                     MavCmd::MAV_CMD_COMPONENT_ARM_DISARM, 
                     MavResult::DENIED
                 )
@@ -427,7 +484,7 @@ void MavlinkBridge::on_arm_disarm_command(mavsdk::ActionServer::Result result, m
         };
 
         this->mavlink_direct_server_.send_message(
-            this->create_ack_mavlink_msg(
+            create_ack_mavlink_msg(
                 MavCmd::MAV_CMD_COMPONENT_ARM_DISARM, 
                 MavResult::ACCEPTED
             )
@@ -442,20 +499,33 @@ void MavlinkBridge::on_arm_disarm_command(mavsdk::ActionServer::Result result, m
     }
 }
 
-void MavlinkBridge::on_takeoff(mavsdk::ActionServer::Result result, bool clear_all)
+void MavlinkBridge::on_takeoff(Result result, bool clear_all)
 {
-    std::thread([this]() 
+    if (this->is_on_takeoff_.exchange(true))
+        return; // Avoid release more than one thread
+
+    const FlightMode mode_before_takeoff = 
+        this->previous_flight_mode_.exchange(FlightMode::Land);
+    this->should_virtual_stick_be_enabled_ = false; // Security only, since takeoff is required when previous mode is HOLD (still on the ground).
+
+    auto abort_takeoff = [this, mode_before_takeoff]() {
+        this->previous_flight_mode_ = mode_before_takeoff;
+        this->should_virtual_stick_be_enabled_ = (mode_before_takeoff == FlightMode::Posctl); // Security only.
+        this->is_on_takeoff_ = false;
+        this->action_server_.set_flight_mode(mode_before_takeoff);
+    };
+
+    std::thread([this, mode_before_takeoff, abort_takeoff]() 
     {
         if (!this->dji_.is_ready_to_takeoff())
         {
             this->mavlink_direct_server_.send_message(
-                this->create_ack_mavlink_msg(
+                create_ack_mavlink_msg(
                     MavCmd::MAV_CMD_NAV_TAKEOFF, 
                     MavResult::DENIED
                 )
             );
-            if (this->previous_flight_mode_ == mavsdk::ActionServer::FlightMode::Posctl)
-                this->should_virtual_stick_be_enabled_ = true;
+            abort_takeoff();
             return;
         };
         
@@ -469,19 +539,26 @@ void MavlinkBridge::on_takeoff(mavsdk::ActionServer::Result result, bool clear_a
         
         bool takeoff_started = false;
         
-        // Wait takeoff start for 2 seconds.
-        for (int i = 0; i < 4; i++)
+        // Wait takeoff start for 10 seconds.
+        for (int i = 0; i < 40; i++)
         {
             if (*http_done && !(*http_success))
-            break; 
+                break; 
             
             if (this->dji_.get_drone_status() == "TAKING_OFF")
             {
                 takeoff_started = true;
-                this->is_on_takeoff = true;
                 this->should_virtual_stick_be_enabled_ = false;
                 break;
             }
+
+            this->mavlink_direct_server_.send_message(
+                create_ack_mavlink_msg(
+                    MavCmd::MAV_CMD_NAV_TAKEOFF, 
+                    MavResult::IN_PROGRESS
+                )
+            );
+
             std::this_thread::sleep_for(std::chrono::milliseconds(250));
         }
 
@@ -489,13 +566,12 @@ void MavlinkBridge::on_takeoff(mavsdk::ActionServer::Result result, bool clear_a
         if (!takeoff_started)
         {
             this->mavlink_direct_server_.send_message(
-                this->create_ack_mavlink_msg(
+                create_ack_mavlink_msg(
                     MavCmd::MAV_CMD_NAV_TAKEOFF, 
                     MavResult::FAILED
                 )
             );
-            if (this->previous_flight_mode_ == mavsdk::ActionServer::FlightMode::Posctl)
-                this->should_virtual_stick_be_enabled_ = true;
+            abort_takeoff();
             return;
         }
 
@@ -503,45 +579,50 @@ void MavlinkBridge::on_takeoff(mavsdk::ActionServer::Result result, bool clear_a
         while (!(this->dji_.get_drone_status() == "IDLE"))
         {
             this->mavlink_direct_server_.send_message(
-                this->create_ack_mavlink_msg(
+                create_ack_mavlink_msg(
                     MavCmd::MAV_CMD_NAV_TAKEOFF, 
                     MavResult::IN_PROGRESS
                 )
             );
-            std::this_thread::sleep_for(std::chrono::milliseconds(500));
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
         }
 
         // Send ACCEPTED when task is over.
         this->mavlink_direct_server_.send_message(
-            this->create_ack_mavlink_msg(
+            create_ack_mavlink_msg(
                 MavCmd::MAV_CMD_NAV_TAKEOFF, 
                 MavResult::ACCEPTED
             )
         );
 
-        this->is_on_takeoff = false;
+        this->is_on_takeoff_ = false;
 
-        if (this->previous_flight_mode_ == mavsdk::ActionServer::FlightMode::Posctl)
-            this->should_virtual_stick_be_enabled_ = true;
+        // Drone MUST engage to Hold mode when auto takeoff is done.
+        // When calling set_flight_mode(Hold), next previous_flight_mode will be Hold and should_virtual_stick_be_enabled_ will be false.
+        this->action_server_.set_flight_mode(FlightMode::Hold);
     }).detach();
 }
 
-void MavlinkBridge::on_land(mavsdk::ActionServer::Result result, bool clear_all)
+void MavlinkBridge::on_land(Result result, bool clear_all)
 {
-    std::thread([this]() 
+    if (this->is_on_land_.exchange(true))
+        return; // Avoid release more than one thread
+
+    const FlightMode mode_before_land = this->previous_flight_mode_;
+    this->should_virtual_stick_be_enabled_ = false;
+
+    auto abort_land = [this, mode_before_land]() {
+        this->previous_flight_mode_ = mode_before_land;
+        this->should_virtual_stick_be_enabled_ = (mode_before_land == FlightMode::Posctl);
+        this->is_on_land_ = false;
+        this->action_server_.set_flight_mode(mode_before_land);
+    };
+
+    std::thread([this, abort_land]() 
     {
-        std::cout << "Land required" << "\n";
-   
         if (!this->dji_.is_armed())
         {
-            this->mavlink_direct_server_.send_message(
-                this->create_ack_mavlink_msg(
-                    MavCmd::MAV_CMD_NAV_LAND, 
-                    MavResult::DENIED
-                )
-            );
-            if (this->previous_flight_mode_ == mavsdk::ActionServer::FlightMode::Posctl)
-                this->should_virtual_stick_be_enabled_ = true;
+            abort_land();
             return;
         };
 
@@ -555,8 +636,8 @@ void MavlinkBridge::on_land(mavsdk::ActionServer::Result result, bool clear_all)
 
         bool landing_started = false;
 
-        // Wait land start for 2 seconds.
-        for (int i = 0; i < 4; i++)
+        // Wait land start for 3 seconds.
+        for (int i = 0; i < 12; i++)
         {
             if (*http_done && !(*http_success))
                 break; 
@@ -564,63 +645,43 @@ void MavlinkBridge::on_land(mavsdk::ActionServer::Result result, bool clear_all)
             if (this->dji_.get_drone_status() == "LANDING")
             {
                 landing_started  = true;
-                this->is_on_land = true;
-                this->should_virtual_stick_be_enabled_ = false;
                 break;
             }
+
             std::this_thread::sleep_for(std::chrono::milliseconds(250));
         }
 
         // If land has not started, send FAILED.
         if (!landing_started)
         {
-            this->mavlink_direct_server_.send_message(
-                this->create_ack_mavlink_msg(
-                    MavCmd::MAV_CMD_NAV_LAND, 
-                    MavResult::FAILED
-                )
-            );
-            if (this->previous_flight_mode_ == mavsdk::ActionServer::FlightMode::Posctl)
-                this->should_virtual_stick_be_enabled_ = true;
+            abort_land();
             return;
         }
 
         // Send IN_PROGRESS untill land is done.
-        while (!(this->dji_.get_drone_status() == "IDLE"))
+        while (this->dji_.get_drone_status() != "IDLE" &&
+               this->dji_.is_armed())
         {
-            this->mavlink_direct_server_.send_message(
-                this->create_ack_mavlink_msg(
-                    MavCmd::MAV_CMD_NAV_LAND, 
-                    MavResult::IN_PROGRESS
-                )
-            );
-            std::this_thread::sleep_for(std::chrono::milliseconds(500));
+            std::this_thread::sleep_for(std::chrono::milliseconds(250));
         }
 
-        // Send ACCEPTED when task is over.
-        this->mavlink_direct_server_.send_message(
-            this->create_ack_mavlink_msg(
-                MavCmd::MAV_CMD_NAV_LAND, 
-                MavResult::ACCEPTED
-            )
-        );
+        this->is_on_land_ = false;
 
-        this->is_on_land = false;
-
-        if (this->previous_flight_mode_ == mavsdk::ActionServer::FlightMode::Posctl)
-            this->should_virtual_stick_be_enabled_ = false; // The drone is on the ground. Virtual stick should NOT be enabled back.
+        // Drone MUST engage to Hold mode when auto land is done.
+        // When calling set_flight_mode(Hold), next previous_flight_mode will be Hold and should_virtual_stick_be_enabled_ will be false.
+        this->action_server_.set_flight_mode(FlightMode::Hold);
     }).detach();
 }
 
-bool MavlinkBridge::on_manual_control(mavsdk::Mavsdk::MavlinkMessage msg)
+bool MavlinkBridge::on_manual_control(MavlinkMessage msg)
 {
     if (!this->is_virtual_stick_enabled_)
-        return false;
+        return true;
 
-    auto lx_str = this->extract_json_value(msg.fields_json, "r"); // Yaw   (-1000 to 1000)
-    auto ly_str = this->extract_json_value(msg.fields_json, "z"); // Throttle (0 to 1000)
-    auto rx_str = this->extract_json_value(msg.fields_json, "y"); // Roll  (-1000 to 1000)
-    auto ry_str = this->extract_json_value(msg.fields_json, "x"); // Pitch (-1000 to 1000)
+    auto lx_str = extract_json_value(msg.fields_json, "r"); // Yaw   (-1000 to 1000)
+    auto ly_str = extract_json_value(msg.fields_json, "z"); // Throttle (0 to 1000)
+    auto rx_str = extract_json_value(msg.fields_json, "y"); // Roll  (-1000 to 1000)
+    auto ry_str = extract_json_value(msg.fields_json, "x"); // Pitch (-1000 to 1000)
 
     if (rx_str && ry_str && lx_str && ly_str) 
     {
@@ -630,10 +691,10 @@ bool MavlinkBridge::on_manual_control(mavsdk::Mavsdk::MavlinkMessage msg)
         float rx = std::stof(rx_str.value());
         float ry = std::stof(ry_str.value());
 
-        lx = lx / 1000.f;
-        ly = (ly - 500.f )/ 500.f;
-        rx = rx / 1000.f;
-        ry = ry / 1000.f;
+        lx = (lx / 1000.f) / 2.f;
+        ly = ((ly - 500.f )/ 500.f) / 2.f;
+        rx = (rx / 1000.f) / 2.f;
+        ry = (ry / 1000.f) / 2.f;
 
         std::string payload = std::to_string(lx) + "," + 
                                 std::to_string(ly) + "," + 
@@ -655,13 +716,35 @@ bool MavlinkBridge::on_manual_control(mavsdk::Mavsdk::MavlinkMessage msg)
     return false;
 }
 
+bool MavlinkBridge::on_command_ack_outgoing_message(MavlinkMessage msg)
+{
+    std::optional<std::string> command = extract_json_value(msg.fields_json, "command");
+    
+    std::string arm_disarm_code = std::to_string(MavCmd::MAV_CMD_COMPONENT_ARM_DISARM);
+    std::string takeoff_code    = std::to_string(MavCmd::MAV_CMD_NAV_TAKEOFF);
+    std::string land_code       = std::to_string(MavCmd::MAV_CMD_NAV_LAND);
+    
+    if (command == std::nullopt)
+        return false;
+    
+    if (command == takeoff_code)
+    {
+        std::optional<std::string> result_param2 = extract_json_value(msg.fields_json, "result_param2");
+        if(result_param2 == "999")
+            return true;
+        return false;
+    }
+    else
+        return true;
+}
+
 // --------------------------
 // HELPERS
 // --------------------------
 
-mavsdk::MavlinkDirectServer::MavlinkMessage MavlinkBridge::create_ack_mavlink_msg(uint16_t command, uint8_t result)
+DirectMavlinkMessage create_ack_mavlink_msg(uint16_t command, uint8_t result)
 {
-    mavsdk::MavlinkDirectServer::MavlinkMessage msg;
+    DirectMavlinkMessage msg;
     msg.message_name = "COMMAND_ACK";
     msg.fields_json  = R"({
         "command":)" + std::to_string(command) + R"(,
@@ -674,7 +757,7 @@ mavsdk::MavlinkDirectServer::MavlinkMessage MavlinkBridge::create_ack_mavlink_ms
     return msg;
 }
 
-std::optional<std::string> MavlinkBridge::extract_json_value(const std::string& json_str, const std::string& key) 
+std::optional<std::string> extract_json_value(const std::string& json_str, const std::string& key) 
 {
     std::string search_key = "\"" + key + "\":";
 
