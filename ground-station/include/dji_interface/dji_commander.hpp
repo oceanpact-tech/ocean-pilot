@@ -70,6 +70,12 @@ public:
     void request_land(std::function<void(bool)> on_complete = nullptr);
 
     /**
+     * @brief Requests the drone to return to home.
+     * @param on_complete Optional callback function to be executed after the request is processed.
+     */
+    void request_return_to_home(std::function<void(bool)> on_complete = nullptr);
+
+    /**
      * @brief Requests the drone to enable virtual stick.
      * @param on_complete Optional callback function to be executed after the request is processed.
      */
@@ -87,6 +93,20 @@ public:
      * @param payload "leftX,leftY,rightX,rightY". Each stick value should be in the interval [-1,1].
      */
     void send_stick(std::string payload, std::function<void(bool)> on_complete = nullptr);
+
+    /**
+     * @brief Go to altitude.
+     * @param on_complete Optional callback function to be executed after the request is processed.
+     * @param altitude Relative altitude in meters.
+     */
+    void go_to_altitude(float payload, std::function<void(bool)> on_complete = nullptr);
+
+    /**
+     * @brief Go to altitude by position.
+     * @param on_complete Optional callback function to be executed after the request is processed.
+     * @param altitude Relative altitude in meters.
+     */
+    void go_to_altitude_by_position(float payload, std::function<void(bool)> on_complete = nullptr);
 
 
 private:
