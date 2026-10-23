@@ -35,6 +35,7 @@
 #include <mavsdk/plugins/action_server/action_server.hpp>
 #include <mavsdk/plugins/mavlink_direct_server/mavlink_direct_server.hpp>
 #include <mavsdk/plugins/param_server/param_server.hpp>
+#include <mavsdk/plugins/mission_raw_server/mission_raw_server.hpp>
 
 // Project modules
 #include "dji_interface/dji_interface.hpp"
@@ -43,6 +44,7 @@
 #include "mavlink_bridge/telemetry_publisher.hpp"
 #include "mavlink_bridge/flight_action_executor.hpp"
 #include "mavlink_bridge/manual_control_handler.hpp"
+#include "mavlink_bridge/mission_handler.hpp"
 
 
 /* Definitions  --------------------------------------------------------------*/
@@ -114,6 +116,7 @@ private:
     mavsdk::ActionServer        action_server_;         ///< MAVSDK action server.
     mavsdk::MavlinkDirectServer mavlink_direct_server_; ///< MAVSDK MAVLink direct server.
     mavsdk::ParamServer         param_server_;          ///< MAVSDK param server.
+    mavsdk::MissionRawServer    mission_server_;        ///< MAVSDK mission server. 
 
     inline static uint32_t system_id_    = 0;
     inline static uint8_t  component_id_ = 0;
@@ -174,7 +177,7 @@ private:
     TelemetryPublisher   telemetry_publisher_;    ///< Telemetry and heartbeat publisher module.
     FlightActionExecutor flight_action_executor_; ///< Asynchronous executor for takeoff, land, and arming.
     ManualControlHandler manual_control_handler_; ///< Handler for DJI Virtual Stick and MANUAL_CONTROL inputs.
-
+    MissionHandler       mission_handler_;        ///< Handler for incoming waypoint missions.
 
     // --------------------------
     // SUBSCRIPTION HANDLES

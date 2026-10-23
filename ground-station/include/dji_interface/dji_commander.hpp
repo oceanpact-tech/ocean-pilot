@@ -108,6 +108,13 @@ public:
      */
     void go_to_altitude_by_position(float payload, std::function<void(bool)> on_complete = nullptr);
 
+    /**
+     * @brief Send DJI Native trajectory.
+     * @param on_complete Optional callback function to be executed after the request is processed.
+     * @param payload "speed;lat,lon,alt;...".
+     */
+    void send_dji_native_trajectory(std::string payload, std::function<void(bool)> on_complete = nullptr);
+
 
 private:
     HttpHandler http_client_;

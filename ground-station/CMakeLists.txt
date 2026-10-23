@@ -81,6 +81,7 @@ add_library(mavlink_bridge STATIC
     src/mavlink_bridge/flight_action_executor.cpp
     src/mavlink_bridge/telemetry_publisher.cpp
     src/mavlink_bridge/manual_control_handler.cpp
+    src/mavlink_bridge/mission_handler.cpp
 )
 target_include_directories(mavlink_bridge PUBLIC include/mavlink_bridge)
 target_link_libraries(mavlink_bridge 

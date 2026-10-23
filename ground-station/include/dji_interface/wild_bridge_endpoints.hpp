@@ -47,7 +47,7 @@ namespace endpoints
         constexpr std::string_view GO_TO_ALTITUDE_BY_POSITION = "/send/gotoAltitudeByPosition";
         // constexpr std::string_view CAMERA_START_RECORDING = "/send/camera/startRecording";
         // constexpr std::string_view CAMERA_STOP_RECORDING = "/send/camera/stopRecording";
-        // constexpr std::string_view GOTO_TRAJECTORY_DJI_NATIVE = "/send/navigateTrajectoryDJINative";
+        constexpr std::string_view GO_TO_TRAJECTORY_DJI_NATIVE = "/send/navigateTrajectoryDJINative";
         // constexpr std::string_view ABORT_DJI_NATIVE_MISSION = "/send/abort/DJIMission";
         // constexpr std::string_view SET_RTH_ALTITUDE = "/send/setRTHAltitude";
         // constexpr std::string_view DEACTIVATE_MANUAL_OVERRIDE = "/send/deactivateManualOverride";

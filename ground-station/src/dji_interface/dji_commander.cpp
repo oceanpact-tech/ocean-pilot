@@ -57,3 +57,8 @@ void DJICommander::go_to_altitude_by_position(float altitude, std::function<void
     std::string payload = std::to_string(altitude);
     this->http_client_.post_async(std::string(endpoints::post::GO_TO_ALTITUDE_BY_POSITION), payload, on_complete);
 }
+
+void DJICommander::send_dji_native_trajectory(std::string payload, std::function<void(bool)> on_complete) 
+{
+    this->http_client_.post_async(std::string(endpoints::post::GO_TO_TRAJECTORY_DJI_NATIVE), payload, on_complete);
+}

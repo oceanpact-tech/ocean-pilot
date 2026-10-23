@@ -45,6 +45,7 @@ MavlinkBridge::MavlinkBridge(
       action_server_(this->mavsdk_.server_component()),
       mavlink_direct_server_(this->mavsdk_.server_component()),
       param_server_(this->mavsdk_.server_component()),
+      mission_server_(this->mavsdk_.server_component()),
       state_manager_(),
       telemetry_publisher_(
           this->dji_,
@@ -61,6 +62,10 @@ MavlinkBridge::MavlinkBridge(
       manual_control_handler_(
           this->dji_,
           this->state_manager_
+      ),
+      mission_handler_(
+        this->dji_, 
+        this->mission_server_
       ),
       telemetry_timer_(ioc)
 { 
@@ -108,6 +113,9 @@ bool MavlinkBridge::start()
     
     // Start telemetry stream via mavlink
     this->schedule_telemetry();
+
+    // Start mission handler
+    this->mission_handler_.start();
 
     // --------------------------
     // SUBSCRIBERS
@@ -213,7 +221,6 @@ bool MavlinkBridge::on_incoming_message(MavlinkMessage msg)
 {
     if (msg.message_name == "MANUAL_CONTROL")
     {
-        std::cout << "ENTREI AQUI!!\n";
         return this->manual_control_handler_.handle_manual_control_message(msg);
     }
 
