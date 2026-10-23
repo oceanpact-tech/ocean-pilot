@@ -6,4 +6,4 @@
 	url = git@github.com:oceanpact-tech/ocean-pilot-app.git
 [submodule "ground-station/third_party/MAVSDK"]
 	path = ground-station/third_party/MAVSDK
-	url = git@github.com:oceanpact-tech/MAVSDK.git
+	url = https://github.com/mavlink/MAVSDK.git
