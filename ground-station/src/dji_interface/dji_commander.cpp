@@ -62,3 +62,13 @@ void DJICommander::send_dji_native_trajectory(std::string payload, std::function
 {
     this->http_client_.post_async(std::string(endpoints::post::GO_TO_TRAJECTORY_DJI_NATIVE), payload, on_complete);
 }
+
+void DJICommander::go_to_waypoint_nose_forward(std::string payload, std::function<void(bool, std::string)> on_complete) 
+{
+    this->http_client_.post_async(std::string(endpoints::post::GOTO_WP_NOSE_FORWARD), payload, on_complete);
+}
+
+void DJICommander::go_to_waypoint_hold_heading(std::string payload, std::function<void(bool, std::string)> on_complete) 
+{
+    this->http_client_.post_async(std::string(endpoints::post::GOTO_WP_HOLD_HEADING), payload, on_complete);
+}

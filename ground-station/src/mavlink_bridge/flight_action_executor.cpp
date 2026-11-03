@@ -25,6 +25,7 @@
 #include "mavlink_bridge/custom_types/mav_cmd.hpp"
 #include "mavlink_bridge/custom_types/mav_result.hpp"
 #include "mavlink_bridge/utils/mavlink_json_utils.hpp"
+#include "mavlink_bridge/utils/http_response_utils.hpp"
 
 
 /* Public Class Methods ------------------------------------------------------*/
@@ -32,11 +33,17 @@
 FlightActionExecutor::FlightActionExecutor(
     DJIInterface& dji,
     FlightStateManager& state_manager,
-    mavsdk::MavlinkDirectServer& mavlink_direct_server
+    mavsdk::MavlinkDirectServer& mavlink_direct_server,
+    mavsdk::ActionServer& action_server,
+    GroundStationLogger& ground_station_logger,
+    MissionHandler& mission_handler
 )
     : dji_(dji),
       state_manager_(state_manager),
-      mavlink_direct_server_(mavlink_direct_server)
+      mavlink_direct_server_(mavlink_direct_server),
+      action_server_(action_server),
+      gs_logger_(ground_station_logger),
+      mission_handler_(mission_handler)
 {
 }
 
@@ -300,7 +307,100 @@ void FlightActionExecutor::execute_return_to_launch()
     );
 }
 
-void FlightActionExecutor::execute_change_altitude(float target_altitude_amsl)
+void FlightActionExecutor::execute_navigate_to_waypoint(const Location3D& waypoint)
+{
+    // Wait untill previous actions is concluded. Blocking.
+    if (this->change_altitude_worker_.joinable())
+        this->change_altitude_worker_.join();
+
+    this->is_navigating_to_waypoint_ = true;
+
+    this->navigate_to_waypoint_worker_ = std::jthread(
+        [this, waypoint](std::stop_token stoken) 
+        {
+            if (!this->dji_.is_armed() ||
+                this->dji_.is_manual_override_active())
+            {
+                std::this_thread::sleep_for(std::chrono::milliseconds(5000));
+            }
+
+            std::string payload = std::to_string(waypoint.latitude/10e6) + "," + std::to_string(waypoint.longitude/10e6) + "," + std::to_string(waypoint.altitude) + "," + std::to_string(this->dji_.get_attitude().yaw) + ",5.0";
+
+            while(true)
+            {
+                auto http_success = std::make_shared<std::atomic<bool>>(false);
+                auto http_done    = std::make_shared<std::atomic<bool>>(false);
+                auto response_ptr = std::make_shared<std::string>();
+
+                std::cout << payload << "\n";
+
+                this->dji_.go_to_waypoint_nose_forward(
+                    payload,
+                    [http_success, http_done, response_ptr](bool success, std::string response) {
+                        *http_success = success;
+                        *response_ptr = response;
+                        *http_done    = true;
+                    }
+                );
+
+                bool wp_started = false;
+
+                // Wait 10s http conclude.
+                for (int i = 0; i < 40 && !stoken.stop_requested(); i++)
+                {
+                    if (*http_done && !(*http_success))
+                        break;
+                    std::this_thread::sleep_for(std::chrono::milliseconds(250));
+                }
+
+                for (int i = 0; i < 40 && !stoken.stop_requested(); i++)
+                {
+                    if (this->dji_.get_drone_status() == "NAVIGATING")
+                    {
+                        wp_started = true;
+                        break;
+                    }
+                    std::this_thread::sleep_for(std::chrono::milliseconds(250));
+                }
+
+
+                if (stoken.stop_requested())
+                    return;
+                if (!wp_started)
+                    continue;
+
+                std::cout << *response_ptr << "\n";
+
+                // Wait until landing is done (status is IDLE or motors disarm).
+                while (!stoken.stop_requested()                 &&
+                       this->dji_.get_drone_status() != "IDLE")
+                {
+                    std::this_thread::sleep_for(std::chrono::milliseconds(250));
+                }
+
+                if (stoken.stop_requested())
+                    return;
+
+                int seq_id = extract_waypoint_seq(*response_ptr);
+                std::cout << "WAYPOINT [" << seq_id << "]: rechead -" << this->dji_.is_waypoint_reached(seq_id) << "\n";
+
+                if (!this->dji_.is_waypoint_reached(seq_id))
+                {
+                    std::cout << "TENTANDO NOVAMENTE WAYPOINT\n";
+                    continue;
+                }
+                else
+                {
+                    break;
+                }
+            }
+
+            this->is_navigating_to_waypoint_ = false;
+        }
+    );
+}
+
+void FlightActionExecutor::execute_change_altitude(const float& target_altitude_amsl)
 {
     if (this->is_changing_altitude_)
     {
@@ -311,11 +411,9 @@ void FlightActionExecutor::execute_change_altitude(float target_altitude_amsl)
         return;
     }
 
-    // Clear worker cache before recreate it.
+    // Wait untill previous actions is concluded. Blocking.
     if (this->change_altitude_worker_.joinable())
-    {
         this->change_altitude_worker_.join();
-    }
 
     this->is_changing_altitude_ = true;
 
@@ -406,6 +504,75 @@ void FlightActionExecutor::execute_change_altitude(float target_altitude_amsl)
             
             // Allow next request
             this->is_changing_altitude_ = false; 
+        }
+    );
+}
+
+void FlightActionExecutor::execute_mission()
+{
+    std::vector<mavsdk::MissionRawServer::MissionItem> mission_items =
+        this->get_latest_mission_plan().mission_items;
+
+    if (mission_items.empty())
+        return;
+
+    if (this->is_on_mission.exchange(true))
+        return;
+
+    // Finish running mission before start a new one.
+    if (this->mission_worker_.joinable())
+        this->mission_worker_.join(); // Wait for running mission thread finish.
+
+    this->mission_worker_ = std::jthread(
+        [this, mission_items](std::stop_token /*stoken*/)
+        {
+            for (const auto& item : mission_items)
+            {
+                switch (item.command)
+                {
+                case MavCmd::MAV_CMD_NAV_TAKEOFF:
+                    this->execute_takeoff();
+                    if (this->takeoff_worker_.joinable())
+                        this->takeoff_worker_.join(); // Wait for takeoff finish.
+                    this->mission_handler_.set_current_item_complete();
+                    break;
+
+                case MavCmd::MAV_CMD_NAV_LAND:
+                    this->execute_land();
+                    if (this->land_worker_.joinable())
+                        this->land_worker_.join(); // Wait for land finish.
+                    this->mission_handler_.set_current_item_complete();
+                    break;
+
+                case MavCmd::MAV_CMD_NAV_RETURN_TO_LAUNCH:
+                    this->execute_return_to_launch();
+                    if (this->rtl_worker_.joinable())
+                        this->rtl_worker_.join(); // Wait for land finish.
+                    this->mission_handler_.set_current_item_complete();
+                    break;
+
+                case MavCmd::MAV_CMD_NAV_WAYPOINT:
+                {
+                    Location3D waypoint;
+                    waypoint.latitude  = item.x;
+                    waypoint.longitude = item.y;
+                    waypoint.altitude  = item.z;
+                    
+                    this->execute_navigate_to_waypoint(waypoint);
+                    
+                    if (this->navigate_to_waypoint_worker_.joinable())
+                        this->navigate_to_waypoint_worker_.join(); // Wait for land finish.
+                    
+                        this->mission_handler_.set_current_item_complete();
+                    break;
+                }
+
+                default:
+                    break;
+                }
+            }
+            this->is_on_mission = false;
+            this->action_server_.set_flight_mode(mavsdk::ActionServer::FlightMode::Hold);
         }
     );
 }

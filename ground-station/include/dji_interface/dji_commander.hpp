@@ -99,14 +99,14 @@ public:
      * @param on_complete Optional callback function to be executed after the request is processed.
      * @param altitude Relative altitude in meters.
      */
-    void go_to_altitude(float payload, std::function<void(bool)> on_complete = nullptr);
+    void go_to_altitude(float altitude, std::function<void(bool)> on_complete = nullptr);
 
     /**
      * @brief Go to altitude by position.
      * @param on_complete Optional callback function to be executed after the request is processed.
      * @param altitude Relative altitude in meters.
      */
-    void go_to_altitude_by_position(float payload, std::function<void(bool)> on_complete = nullptr);
+    void go_to_altitude_by_position(float altitude, std::function<void(bool)> on_complete = nullptr);
 
     /**
      * @brief Send DJI Native trajectory.
@@ -115,7 +115,21 @@ public:
      */
     void send_dji_native_trajectory(std::string payload, std::function<void(bool)> on_complete = nullptr);
 
+    /**
+     * @brief Navigate to waypoint. Turn to face the leg, fly forward, rotate to yaw on arrival.
+     * @param on_complete Optional callback function to be executed after the request is processed.
+     * @param payload "lat,lon,alt,yaw[,speed]". yaw = final heading.
+     */
+    void go_to_waypoint_nose_forward(std::string payload, std::function<void(bool, std::string)> on_complete = nullptr);
+
+    /**
+     * @brief Navigate to waypoint. Hold yaw for the whole flight (drone crabs sideways), tighter arrival tolerance.
+     * @param on_complete Optional callback function to be executed after the request is processed.
+     * @param payload "lat,lon,alt,yaw[,speed]".
+     */
+    void go_to_waypoint_hold_heading(std::string payload, std::function<void(bool, std::string)> on_complete = nullptr);
 
 private:
-    HttpHandler http_client_;
+
+    HttpHandler http_client_; ///< HTTP client.
 };

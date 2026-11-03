@@ -26,6 +26,7 @@
 // MAVSDK
 #include <mavsdk/plugins/action_server/action_server.hpp>
 
+#include "mavlink_bridge/mission_handler.hpp"
 #include "mavlink_bridge/custom_types/mav_land_state.hpp"
 
 
@@ -114,7 +115,13 @@ public:
     };
 
     /// @brief Default constructor for FlightStateManager.
-    FlightStateManager() = default;
+    FlightStateManager(
+        MissionHandler& mission_handler,
+        FlightActionExecutor& flight_action_executor
+    )
+        : mission_handler_(mission_handler),
+          flight_action_executor_(flight_action_executor)
+    {}
 
     /// @brief Destructor for FlightStateManager.
     ~FlightStateManager() = default;
@@ -162,6 +169,10 @@ public:
     ActiveManeuver get_active_maneuver() const;
 
 private:
+
+    // Composed modules. 
+    MissionHandler& mission_handler_; ///< Mission Handler; 
+    FlightActionExecutor& flight_action_executor_; ///< Flight action executor
 
     /**
      * @brief Internal callback invoked by ActionScope destructor to exit a maneuver.

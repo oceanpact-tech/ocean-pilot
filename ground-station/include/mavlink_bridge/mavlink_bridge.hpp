@@ -45,6 +45,7 @@
 #include "mavlink_bridge/flight_action_executor.hpp"
 #include "mavlink_bridge/manual_control_handler.hpp"
 #include "mavlink_bridge/mission_handler.hpp"
+#include "mavlink_bridge/ground_station_logger.hpp"
 
 
 /* Definitions  --------------------------------------------------------------*/
@@ -105,7 +106,6 @@ private:
 
     GroundStationSocketConfig ground_station_socket_; ///< Ground station socket.
     DJIInterface dji_;                                ///< DJI interface for telemetry and control.
-
 
     // --------------------------
     // MAVLINK CONFIG & SERVERS
@@ -168,16 +168,16 @@ private:
         }
     }
 
-
     // --------------------------
     // COMPOSED MODULES
     // --------------------------
 
     FlightStateManager   state_manager_;          ///< Thread-safe state machine for flight modes and maneuvers.
     TelemetryPublisher   telemetry_publisher_;    ///< Telemetry and heartbeat publisher module.
-    FlightActionExecutor flight_action_executor_; ///< Asynchronous executor for takeoff, land, and arming.
+    FlightActionExecutor flight_action_executor_; ///< Asynchronous executor for takeoff, land, rtl, change altitude and missions.
     ManualControlHandler manual_control_handler_; ///< Handler for DJI Virtual Stick and MANUAL_CONTROL inputs.
     MissionHandler       mission_handler_;        ///< Handler for incoming waypoint missions.
+    GroundStationLogger  ground_station_logger_;  ///< Logger utility for dispatching STATUSTEXT messages and alerts to the GCS.
 
     // --------------------------
     // SUBSCRIPTION HANDLES
@@ -188,7 +188,6 @@ private:
     mavsdk::ActionServer::ArmDisarmHandle        arm_disarm_handle_{};   ///< Handle for arm/disarm command callback.
     mavsdk::ActionServer::TakeoffHandle          takeoff_handle_{};      ///< Handle for takeoff command callback.
     mavsdk::ActionServer::FlightModeChangeHandle flight_mode_handle_{};  ///< Handle for flight mode change callback.
-
 
     // --------------------------
     // SCHEDULING TIMER

@@ -42,7 +42,7 @@ namespace endpoints
         // constexpr std::string_view ABORT_MISSION = "/send/abortMission";
         // constexpr std::string_view ABORT_ALL = "/send/abortAll";
         // constexpr std::string_view GOTO_YAW = "/send/gotoYaw";
-        // constexpr std::string_view GOTO_WP_NOSE_FORWARD = "/send/gotoWaypointNoseForward";
+        constexpr std::string_view GOTO_WP_NOSE_FORWARD = "/send/gotoWaypointNoseForward";
         constexpr std::string_view GO_TO_ALTITUDE = "/send/gotoAltitude";
         constexpr std::string_view GO_TO_ALTITUDE_BY_POSITION = "/send/gotoAltitudeByPosition";
         // constexpr std::string_view CAMERA_START_RECORDING = "/send/camera/startRecording";
@@ -57,7 +57,7 @@ namespace endpoints
         // constexpr std::string_view DOWNLOAD_MEDIA_BY_NAME = "/send/downloadMediaByName";
 
         /// PID Tuning
-        // constexpr std::string_view GOTO_WP_HOLD_HEADING = "/send/gotoWaypointHoldHeading";
+        constexpr std::string_view GOTO_WP_HOLD_HEADING = "/send/gotoWaypointHoldHeading";
         // constexpr std::string_view PAYLOAD_DROP = "/send/drop";
     }
 

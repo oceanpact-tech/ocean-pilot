@@ -23,6 +23,8 @@
 
 #include "dji_interface/dji_interface.hpp"
 
+class FlightActionExecutor;
+
 
 /* Classes  ------------------------------------------------------------------*/
 
@@ -38,12 +40,20 @@ class MissionHandler
 {
 public:
 
+    using MissionPlan = mavsdk::MissionRawServer::MissionPlan;
+    using IncomingMissionHandle = mavsdk::MissionRawServer::IncomingMissionHandle;
+    using Result = mavsdk::MissionRawServer::Result;
+
     /**
      * @brief Constructor for MissionHandler.
      * @param dji            Reference to the DJI hardware interface.
      * @param mission_server Reference to the MAVSDK mission raw server plugin.
      */
-    MissionHandler(DJIInterface& dji, mavsdk::MissionRawServer& mission_server);
+    MissionHandler(
+        DJIInterface& dji, 
+        mavsdk::MissionRawServer& mission_server,
+        FlightActionExecutor& flight_action_executor
+    );
 
     /// @brief Destructor for MissionHandler. Unsubscribes from mission events.
     ~MissionHandler();
@@ -51,19 +61,29 @@ public:
     /// @brief Starts listening for incoming missions from the Ground Station.
     void start();
 
+    inline void set_current_item_complete()
+    {
+        this->mission_server_.set_current_item_complete();
+    }
+
 private:
 
-    // --------------------------
-    // CORE REFERENCES
-    // --------------------------
-
-    DJIInterface&             dji_;            ///< DJI interface for dispatching the mission payload.
+    // Core reference
+    DJIInterface& dji_; ///< DJI interface for dispatching the mission payload.
+    
+    // MAVSDK Servers
     mavsdk::MissionRawServer& mission_server_; ///< MAVSDK raw mission server handling the MAVLink protocol.
+    
+    // Composed modules
+    FlightActionExecutor& flight_action_executor_; ///< Asynchronous executor for takeoff, land, rtl, change altitude and missions.
+
+    // Subscription handles
+    IncomingMissionHandle incoming_mission_handle_{}; ///< Handle for incoming mission callback.
 
 
     // --------------------------
-    // SUBSCRIPTION HANDLES
+    // HANDLES CALLBACK
     // --------------------------
 
-    mavsdk::MissionRawServer::IncomingMissionHandle incoming_mission_handle_{}; ///< Handle for incoming mission callback.
+    void incoming_mission_callback(Result result, MissionPlan plan);
 };

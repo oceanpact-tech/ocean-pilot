@@ -1,11 +1,7 @@
 .vscode/
 
-ground-station/bin/
+ground-station/docker/
 ground-station/build/
 ground-station/test/python
-ground-station/third_party/ros_mavlink_bridge
-ground-station/todo.txt
-
-ocean-pilot-app/third_party
 
 

@@ -41,12 +41,16 @@ MavlinkBridge::MavlinkBridge(
     : ground_station_socket_(std::move(ground_station_socket)),
       dji_(ioc, std::move(wildbridge_socket)),
       mavsdk_(this->create_mavsdk_config()),
+      mavlink_direct_server_(this->mavsdk_.server_component()),
       telemetry_server_(this->mavsdk_.server_component()),
       action_server_(this->mavsdk_.server_component()),
-      mavlink_direct_server_(this->mavsdk_.server_component()),
       param_server_(this->mavsdk_.server_component()),
       mission_server_(this->mavsdk_.server_component()),
-      state_manager_(),
+      ground_station_logger_(this->mavlink_direct_server_),
+      state_manager_(
+        this->mission_handler_,
+        this->flight_action_executor_
+    ),
       telemetry_publisher_(
           this->dji_,
           this->state_manager_,
@@ -57,7 +61,10 @@ MavlinkBridge::MavlinkBridge(
       flight_action_executor_(
           this->dji_,
           this->state_manager_,
-          this->mavlink_direct_server_
+          this->mavlink_direct_server_,
+          this->action_server_,
+          this->ground_station_logger_,
+          this->mission_handler_
       ),
       manual_control_handler_(
           this->dji_,
@@ -65,7 +72,8 @@ MavlinkBridge::MavlinkBridge(
       ),
       mission_handler_(
         this->dji_, 
-        this->mission_server_
+        this->mission_server_,
+        this->flight_action_executor_
       ),
       telemetry_timer_(ioc)
 { 
@@ -214,15 +222,16 @@ bool MavlinkBridge::on_outgoing_message(MavlinkMessage msg)
     if (msg.message_name == "COMMAND_ACK")
         return this->on_command_ack_outgoing_message(msg);
 
+    // if (msg.message_name == "HEARTBEAT")
+    //     std::cout << msg.fields_json << "\n";
+
     return true; // Allow any other message
 }
 
 bool MavlinkBridge::on_incoming_message(MavlinkMessage msg)
 {
     if (msg.message_name == "MANUAL_CONTROL")
-    {
         return this->manual_control_handler_.handle_manual_control_message(msg);
-    }
 
     if (msg.message_name == "COMMAND_LONG")
     {
@@ -239,13 +248,12 @@ bool MavlinkBridge::on_incoming_message(MavlinkMessage msg)
             if (param7_str)
             {
                 float target_amsl = std::stof(param7_str.value());
+                std::cout << "SOLICITANDO MUDANÇA DE ALTURA\n";
                 this->flight_action_executor_.execute_change_altitude(target_amsl);
             }
                 
             return false;
         }
-
-        
     }
 
     return true; // Pass any other message.
@@ -277,6 +285,11 @@ void MavlinkBridge::on_flight_mode_change(FlightMode mode)
 
         case FlightMode::Takeoff:
             std::cout << "[MavlinkBridge] MUDAR Modo para: TAKEOFF\n";
+            break;
+
+        case FlightMode::Mission:
+            std::cout << "[MavlinkBridge] MUDAR Modo para: MISSION\n";
+            this->flight_action_executor_.execute_mission();
             break;
 
         default:

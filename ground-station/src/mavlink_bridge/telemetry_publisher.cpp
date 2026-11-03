@@ -124,8 +124,8 @@ void TelemetryPublisher::publish_telemetry()
 
 void TelemetryPublisher::publish_heartbeat()
 {
-    const bool is_armed        = this->dji_.is_armed();
-    const bool is_vstick_on    = this->dji_.is_virtual_stick_enabled();
+    const bool is_armed = this->dji_.is_armed();
+    const bool is_vstick_on = this->dji_.is_virtual_stick_enabled();
     const FlightMode target_mode = this->state_manager_.get_target_flight_mode(is_armed, is_vstick_on);
 
     // Update arming state

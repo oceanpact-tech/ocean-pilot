@@ -16,6 +16,7 @@
 /* Includes ------------------------------------------------------------------*/
 
 #include "mavlink_bridge/flight_state_manager.hpp"
+#include "mavlink_bridge/flight_action_executor.hpp"
 
 
 /* Public Class Methods ------------------------------------------------------*/
@@ -62,6 +63,10 @@ FlightStateManager::FlightMode FlightStateManager::get_target_flight_mode(
 ) const
 {
     std::lock_guard<std::mutex> lock(this->mutex_);
+    bool is_executing_mission = this->flight_action_executor_.is_executing_mission();
+
+    if (is_executing_mission)
+        return FlightMode::Mission;
 
     if (this->active_maneuver_ == ActiveManeuver::Takeoff)
         return FlightMode::Takeoff;
@@ -98,8 +103,10 @@ bool FlightStateManager::should_virtual_stick_be_enabled(bool is_armed) const
 {
     std::lock_guard<std::mutex> lock(this->mutex_);
 
-    return this->want_virtual_stick_ && 
-           is_armed                  && 
+    bool is_executing_mission = this->flight_action_executor_.is_executing_mission();
+
+    return (this->want_virtual_stick_ || is_executing_mission) && 
+           is_armed && 
            (this->active_maneuver_ == ActiveManeuver::None);
 }
 
