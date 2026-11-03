@@ -11,12 +11,13 @@
 
 #include <boost/json.hpp>
 
+#include "dji_interface/transport/drone_discovery.hpp"
 #include "mavlink_bridge/mavlink_bridge.hpp"
 
 
 /* Defines -------------------------------------------------------------------*/
 
-#define SIMULATION_MODE 0 // 1 = Simulation mode (localhost), 0 = Real drone (
+#define SIMULATION_MODE 0 // 1 = Simulation mode (localhost), 0 = Real drone
 
 
 /* Aliases -------------------------------------------------------------------*/
@@ -34,8 +35,26 @@ int main(int argc, char *argv[])
     auto work_guard = net::make_work_guard(ioc);
 
     std::string drone_ip = "0.0.0.0";
-    if (argc < 3)
+    if (argc >= 2) 
+    {
+        // Se o usuário passou o IP manualmente, ignora a descoberta
         drone_ip = argv[1];
+        std::cout << "DRONE IP (Manual): " << drone_ip << "\n";
+    } 
+    // else 
+    // {
+    //     // Tenta descobrir o drone via UDP Broadcast
+    //     auto discovered_ip = DroneDiscovery::discover_drone(ioc);
+    //     if (discovered_ip) 
+    //     {
+    //         drone_ip = *discovered_ip;
+    //     } 
+    //     else 
+    //     {
+    //         std::cerr << "[Main] Falha fatal: Drone não encontrado na rede. Encerrando.\n";
+    //         return -1;
+    //     }
+    // }
 
     std::cout << "DRONE IP: " <<  drone_ip << "\n";
 
@@ -46,7 +65,9 @@ int main(int argc, char *argv[])
     };
 
     GroundStationSocketConfig ground_station_socket = {
-        .ip = "127.0.0.1", // QGC Running locally
+        .ip = "127.0.0.1",          // QGC Running locally.
+        // .ip = "192.168.88.245",    // QGC Running on another PC.
+        // .ip = "0.0.0.0",              // Discover QGC
         .port = "14550"
     };
 
@@ -54,6 +75,7 @@ int main(int argc, char *argv[])
     MavlinkBridge bridge(ioc, wildbridge_socket, ground_station_socket);
     if (!bridge.start())
     {
+
         std::cerr << "[Main] Fail to start MavlinkBridge.\n";
         return -1;
     }

@@ -46,7 +46,32 @@ void HttpHandler::post_async(
     // Launch the asynchronous operation
     net::co_spawn(
         this->ioc_, 
-        do_post(std::move(endpoint), std::move(payload), on_complete), net::detached
+        do_post(
+            std::move(endpoint), 
+            std::move(payload), 
+            [callback = std::move(on_complete)](bool success, std::string /*ignored_response*/) {
+                if (callback)
+                    callback(success);
+            }
+        ), 
+        net::detached
+    );
+}
+
+void HttpHandler::post_async(
+    std::string endpoint, 
+    std::string payload,
+    std::function<void(bool, std::string)> on_complete) 
+{
+    // Launch the asynchronous operation
+    net::co_spawn(
+        this->ioc_, 
+        do_post(
+            std::move(endpoint), 
+            std::move(payload), 
+            on_complete
+        ), 
+        net::detached
     );
 }
 
@@ -56,7 +81,7 @@ void HttpHandler::post_async(
 net::awaitable<void> HttpHandler::do_post(
     std::string endpoint, 
     std::string payload,
-    std::function<void(bool)> on_complete)
+    std::function<void(bool, std::string)> on_complete)
 {
     try {
         auto executor = co_await net::this_coro::executor;
@@ -100,10 +125,13 @@ net::awaitable<void> HttpHandler::do_post(
         stream.socket().shutdown(tcp::socket::shutdown_both, shutdown_ec);
 
         bool success = (!ec || ec == http::error::end_of_stream) && (res.result_int() == 200);
-        if (on_complete) on_complete(success);
+        
+        std::string response_body = res.body();
+
+        if (on_complete) on_complete(success, response_body);
     } 
     catch (std::exception const& e) {
         std::cerr << "[HttpHandler] Exception on POST " << endpoint << ": " << e.what() << "\n";
-        if (on_complete) on_complete(false);
+        if (on_complete) on_complete(false, "-1");
     }
 }

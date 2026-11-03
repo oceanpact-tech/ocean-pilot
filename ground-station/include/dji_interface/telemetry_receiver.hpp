@@ -132,6 +132,9 @@ public:
     /// @brief Get the last LRF-locked target position (latitude, longitude, altitude).
     Location3D get_lrf_target();
 
+    /// @brief Get the current target KMZ waypoint index
+    int get_current_target_waypoint_index();
+
     /** 
      * @brief Id of the waypoint the streamed 'waypointReached' currently refers to.
      *

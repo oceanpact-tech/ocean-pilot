@@ -5,7 +5,7 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # Set output directory for binaries
-set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/bin")
+set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/build/bin")
 
 # ----- Boost setup -----
 set(Boost_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/third_party/boost")
@@ -66,11 +66,11 @@ target_link_libraries(mavlink_core INTERFACE
 
 # ----- dji_interface -----
 add_library(dji_interface STATIC
-    # src/dji_interface/dji_interface.cpp
     src/dji_interface/telemetry_receiver.cpp
     src/dji_interface/dji_commander.cpp
     src/dji_interface/transport/http_handler.cpp
     src/dji_interface/transport/tcp_handler.cpp    
+    src/dji_interface/transport/drone_discovery.cpp
 )
 target_include_directories(dji_interface PUBLIC include/dji_interface)
 target_link_libraries(dji_interface PUBLIC core_settings)
@@ -78,6 +78,12 @@ target_link_libraries(dji_interface PUBLIC core_settings)
 # ----- mavlink_bridge -----
 add_library(mavlink_bridge STATIC
     src/mavlink_bridge/mavlink_bridge.cpp
+    src/mavlink_bridge/flight_state_manager.cpp
+    src/mavlink_bridge/flight_action_executor.cpp
+    src/mavlink_bridge/telemetry_publisher.cpp
+    src/mavlink_bridge/manual_control_handler.cpp
+    src/mavlink_bridge/mission_handler.cpp
+    src/mavlink_bridge/ground_station_logger.cpp
 )
 target_include_directories(mavlink_bridge PUBLIC include/mavlink_bridge)
 target_link_libraries(mavlink_bridge 
@@ -92,12 +98,8 @@ target_link_libraries(mavlink_bridge
 # Executables
 # ---------------------- 
 
-# add_executable(${PROJECT_NAME} src/dji_interface/main.cpp)
-# target_link_libraries(${PROJECT_NAME} PRIVATE dji_interface)
-
 # add_executable(${PROJECT_NAME}_test_telemetry test/dji_interface/test_telemetry.cpp)
 # target_link_libraries(${PROJECT_NAME}_test_telemetry PRIVATE dji_interface)
 
-# add_executable(mavlink_bridge_test_telemetry test/mavlink_bridge/test_mavlink.cpp)
 add_executable(mavlink_bridge_test_telemetry test/mavlink_bridge/main.cpp)
 target_link_libraries(mavlink_bridge_test_telemetry PRIVATE mavlink_bridge)

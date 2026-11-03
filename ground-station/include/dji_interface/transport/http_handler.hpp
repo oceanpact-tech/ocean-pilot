@@ -69,6 +69,19 @@ public:
         std::string payload,
         std::function<void(bool)> on_complete = nullptr);
 
+
+    /**
+     * @brief Sends a POST request asynchronously using coroutines and capture the response.
+     * 
+     * @param endpoint The endpoint to which the request will be sent.
+     * @param payload The payload to be sent.
+     * @param on_complete A callback function to be called when the request is complete.
+     */
+    void post_async(
+        std::string endpoint, 
+        std::string payload,
+        std::function<void(bool, std::string)> on_complete = nullptr);
+
     /**
      * @brief Internal coroutine that executes the POST request asynchronously.
      * 
@@ -80,7 +93,7 @@ public:
     net::awaitable<void> do_post(
         std::string endpoint, 
         std::string payload, 
-        std::function<void(bool)> on_complete);
+        std::function<void(bool, std::string)> on_complete);
     
 
 private:

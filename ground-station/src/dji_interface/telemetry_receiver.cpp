@@ -300,6 +300,21 @@ Location3D TelemetryReceiver::get_lrf_target()
     return location; 
 }
 
+int TelemetryReceiver::get_current_target_waypoint_index()
+{
+    std::lock_guard<std::mutex> lock(this->telemetry_mtx_);
+    const auto& telemetry = this->latest_telemetry_;
+    if (telemetry.contains("currentTargetWaypointIndex")) 
+    {
+        const auto& waypoint_index = telemetry.at("currentTargetWaypointIndex");
+        if (waypoint_index.is_int64())
+            return static_cast<int>(waypoint_index.as_int64());
+        if (waypoint_index.is_uint64())
+            return static_cast<int>(waypoint_index.as_uint64());
+    }
+    return -1; // Default if not available 
+}
+
 int TelemetryReceiver::get_waypoint_seq() 
 {
     std::lock_guard<std::mutex> lock(this->telemetry_mtx_);
@@ -319,6 +334,7 @@ bool TelemetryReceiver::is_waypoint_reached(int seq)
 {
     std::lock_guard<std::mutex> lock(this->telemetry_mtx_);
     const auto& telemetry = this->latest_telemetry_;
+
     bool reached = false;
     if (telemetry.contains("waypointReached") && telemetry.at("waypointReached").is_bool())
         reached = telemetry.at("waypointReached").as_bool();
@@ -327,7 +343,7 @@ bool TelemetryReceiver::is_waypoint_reached(int seq)
     if (telemetry.contains("waypointSeq")) 
     {
         const auto& seq_val = telemetry.at("waypointSeq");
-        if (seq_val.is_int64()) waypoint_seq = static_cast<int>(seq_val.as_int64());
+        if      (seq_val.is_int64())  waypoint_seq = static_cast<int>(seq_val.as_int64());
         else if (seq_val.is_uint64()) waypoint_seq = static_cast<int>(seq_val.as_uint64());
     }
 
