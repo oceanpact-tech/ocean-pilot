@@ -3,5 +3,5 @@
 ground-station/docker/
 ground-station/build/
 ground-station/test/python
-
+ground-station/z-ignored
 

@@ -20,17 +20,47 @@
 #include <iostream>
 #include <string>
 
+// Composed modules
+#include "mavlink_bridge/flight_state_manager.hpp"
+#include "mavlink_bridge/flight_primitives.hpp"
+#include "mavlink_bridge/flight_action_executor.hpp"
+#include "mavlink_bridge/mission_handler.hpp"
+#include "mavlink_bridge/mission_executor.hpp"
+#include "mavlink_bridge/ground_station_logger.hpp"
+#include "mavlink_bridge/telemetry_publisher.hpp"
+#include "mavlink_bridge/maneuver_runner.hpp"
+
+// Helpers
 #include "mavlink_bridge/utils/mavlink_json_utils.hpp"
 
 
 /* Public Class Methods ------------------------------------------------------*/
 
 ManualControlHandler::ManualControlHandler(
+    // DJI API
     DJIInterface& dji,
-    FlightStateManager& state_manager
+    // Composed modules
+    FlightStateManager& state_manager,
+    FlightActionExecutor& flight_action_executor,
+    FlightPrimitives& flight_primitives,
+    MissionHandler& mission_handler,
+    MissionExecutor& mission_executor,
+    GroundStationLogger& ground_station_logger,
+    TelemetryPublisher& telemetry_publisher,
+    ManeuverRunner& maneuver_runner
 )
-    : dji_(dji),
+    : // DJI API
+      dji_(dji),
+      // Composed modules
       state_manager_(state_manager),
+      flight_primitives_(flight_primitives),
+      flight_action_executor_(flight_action_executor),
+      mission_handler_(mission_handler),
+      mission_executor_(mission_executor),
+      ground_station_logger_(ground_station_logger),
+      telemetry_publisher_(telemetry_publisher),
+      maneuver_runner_(maneuver_runner),
+      // General attributes
       last_enable_attempt_(std::chrono::steady_clock::now() - std::chrono::seconds(5)),
       last_stick_send_(std::chrono::steady_clock::now())
 {
@@ -42,6 +72,7 @@ void ManualControlHandler::maintain_virtual_stick()
     const bool is_armed                 = this->dji_.is_armed();
 
     // If pilot takes control back via manual override, drop Posctl and revert to Hold.
+    // A running maneuver notices the override by itself and unwinds.
     if (this->dji_.is_manual_override_active())
     {
         this->state_manager_.on_manual_override_active();
@@ -82,6 +113,10 @@ void ManualControlHandler::maintain_virtual_stick()
 bool ManualControlHandler::handle_manual_control_message(const mavsdk::Mavsdk::MavlinkMessage& msg)
 {
     if (!this->dji_.is_virtual_stick_enabled())
+        return true;
+
+    // Joystick frames (even neutral ones) must not cancel the commands of a running maneuver.
+    if (!this->state_manager_.is_manual_input_allowed())
         return true;
 
     auto lx_str = extract_json_value(msg.fields_json, "r"); // Yaw      (-1000 to 1000)

@@ -21,11 +21,14 @@
 #include <atomic>
 #include <chrono>
 
-// MAVSDK
+// DJI
+#include "dji_interface/dji_interface.hpp"
+
+// MAVSDK API
 #include <mavsdk/mavsdk.hpp>
 
-#include "dji_interface/dji_interface.hpp"
-#include "mavlink_bridge/flight_state_manager.hpp"
+// Composed modules
+#include "mavlink_bridge/module_fwd.hpp"
 
 
 /* Classes  ------------------------------------------------------------------*/
@@ -34,8 +37,13 @@
  * @brief Controller for Virtual Stick state management and manual joystick inputs.
  * 
  * The ManualControlHandler monitors pilot manual overrides, automatically 
- * enables or disables the DJI Virtual Stick based on the active flight mode, 
- * and scales incoming MAVLink MANUAL_CONTROL axes before sending them to the drone.
+ * enables or disables the DJI Virtual Stick based on the active flight mode 
+ * and maneuver phase, and scales incoming MAVLink MANUAL_CONTROL axes before 
+ * sending them to the drone. MANUAL_CONTROL frames are ignored while a 
+ * maneuver is active.
+ * 
+ * Module references are stored for future extensions and must not be used 
+ * during construction or destruction.
  */
 class ManualControlHandler 
 {
@@ -43,12 +51,28 @@ public:
 
     /**
      * @brief Constructor for ManualControlHandler.
-     * @param dji           Reference to the DJI hardware interface.
-     * @param state_manager Reference to the flight state manager.
+     * @param dji                    Reference to the DJI hardware interface.
+     * @param state_manager          Reference to the flight state manager (composed module).
+     * @param flight_action_executor Reference to the flight action executor (composed module).
+     * @param flight_primitives      Reference to the flight primitives (composed module).
+     * @param mission_handler        Reference to the mission handler (composed module).
+     * @param mission_executor       Reference to the mission executor (composed module).
+     * @param ground_station_logger  Reference to the ground station logger (composed module).
+     * @param telemetry_publisher    Reference to the telemetry publisher (composed module).
+     * @param maneuver_runner        Reference to the maneuver runner (composed module).
      */
     ManualControlHandler(
+        // DJI API
         DJIInterface& dji,
-        FlightStateManager& state_manager
+        // Composed modules
+        FlightStateManager&   state_manager,
+        FlightActionExecutor& flight_action_executor,
+        FlightPrimitives&     flight_primitives,
+        MissionHandler&       mission_handler,
+        MissionExecutor&      mission_executor,
+        GroundStationLogger&  ground_station_logger,
+        TelemetryPublisher&   telemetry_publisher,
+        ManeuverRunner&       maneuver_runner
     );
 
     /// @brief Destructor for ManualControlHandler.
@@ -57,8 +81,9 @@ public:
     /**
      * @brief Synchronizes the DJI Virtual Stick state with the FlightStateManager.
      * 
-     * Detects pilot manual overrides, disables Virtual Stick when leaving Posctl, 
-     * and periodically retries enabling Virtual Stick every 1.5 seconds when required.
+     * Detects pilot manual overrides, disables Virtual Stick when it is not 
+     * required (outside Posctl and outside navigation phases), and periodically 
+     * retries enabling Virtual Stick every 1.5 seconds when required.
      */
     void maintain_virtual_stick();
 
@@ -81,8 +106,21 @@ private:
     // CORE REFERENCES
     // --------------------------
 
-    DJIInterface&       dji_;           ///< DJI interface for Virtual Stick control.
-    FlightStateManager& state_manager_; ///< State manager for querying Virtual Stick intent.
+    DJIInterface& dji_; ///< DJI interface for telemetry polling and command dispatch.
+
+
+    // --------------------------
+    // COMPOSED MODULES
+    // --------------------------
+
+    FlightStateManager&   state_manager_;          ///< Thread-safe state machine for flight modes and maneuvers.
+    FlightActionExecutor& flight_action_executor_; ///< Entry points for takeoff, land, rtl, change altitude and go-to.
+    FlightPrimitives&     flight_primitives_;      ///< Blocking and cancellable flight operations.
+    MissionHandler&       mission_handler_;        ///< Mission plan storage and progress reporter.
+    MissionExecutor&      mission_executor_;       ///< Mission interpreter with pause and resume.
+    GroundStationLogger&  ground_station_logger_;  ///< Logger utility for dispatching STATUSTEXT messages and alerts to the GCS.
+    TelemetryPublisher&   telemetry_publisher_;    ///< Telemetry and heartbeat publisher module.
+    ManeuverRunner&       maneuver_runner_;        ///< Owner of the single maneuver thread.
 
 
     // --------------------------

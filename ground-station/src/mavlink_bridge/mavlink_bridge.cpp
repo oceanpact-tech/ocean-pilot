@@ -17,10 +17,15 @@
 
 #include "mavlink_bridge/mavlink_bridge.hpp"
 
+#include <cmath>
 #include <iostream>
 #include <chrono>
 
+// Mavlink types
 #include "mavlink_bridge/custom_types/mav_cmd.hpp"
+#include "mavlink_bridge/custom_types/mav_result.hpp"
+
+// Helpers
 #include "mavlink_bridge/utils/mavlink_json_utils.hpp"
 
 
@@ -39,41 +44,84 @@ MavlinkBridge::MavlinkBridge(
     const GroundStationSocketConfig ground_station_socket
 ) 
     : ground_station_socket_(std::move(ground_station_socket)),
+      // DJI API
       dji_(ioc, std::move(wildbridge_socket)),
+      // MAVSDK API
       mavsdk_(this->create_mavsdk_config()),
-      mavlink_direct_server_(this->mavsdk_.server_component()),
       telemetry_server_(this->mavsdk_.server_component()),
       action_server_(this->mavsdk_.server_component()),
+      mavlink_direct_server_(this->mavsdk_.server_component()),
       param_server_(this->mavsdk_.server_component()),
       mission_server_(this->mavsdk_.server_component()),
-      ground_station_logger_(this->mavlink_direct_server_),
+      // Composed modules: same order as the declaration in the header (maneuver_runner_ last).
       state_manager_(
-        this->mission_handler_,
-        this->flight_action_executor_
-    ),
-      telemetry_publisher_(
-          this->dji_,
-          this->state_manager_,
-          this->telemetry_server_,
-          this->action_server_,
-          this->mavlink_direct_server_
+        // Do not use DJI Interface
+        // Do not use MAVSDK servers
+        this->flight_action_executor_, this->flight_primitives_,
+        this->mission_handler_, this->mission_executor_, 
+        this->ground_station_logger_, this->manual_control_handler_, this->telemetry_publisher_,
+        this->maneuver_runner_
       ),
       flight_action_executor_(
-          this->dji_,
-          this->state_manager_,
-          this->mavlink_direct_server_,
-          this->action_server_,
-          this->ground_station_logger_,
-          this->mission_handler_
+        this->dji_, 
+        this->mavlink_direct_server_,
+        this->state_manager_, this->flight_primitives_,
+        this->mission_handler_, this->mission_executor_, 
+        this->ground_station_logger_, this->manual_control_handler_, this->telemetry_publisher_,
+        this->maneuver_runner_
       ),
-      manual_control_handler_(
-          this->dji_,
-          this->state_manager_
+      flight_primitives_(
+        this->dji_, 
+        // Do not use MAVSDK servers
+        this->state_manager_, this->flight_action_executor_,
+        this->mission_handler_, this->mission_executor_, 
+        this->ground_station_logger_, this->manual_control_handler_, this->telemetry_publisher_,
+        this->maneuver_runner_
       ),
       mission_handler_(
-        this->dji_, 
+        // Do not use DJI Interface
         this->mission_server_,
-        this->flight_action_executor_
+        this->state_manager_, this->flight_action_executor_, this->flight_primitives_,
+        this->mission_executor_, 
+        this->ground_station_logger_, this->manual_control_handler_, this->telemetry_publisher_,
+        this->maneuver_runner_
+      ),
+      mission_executor_(
+        this->dji_,
+        // Do not use MAVSDK servers
+        this->state_manager_, this->flight_action_executor_, this->flight_primitives_,
+        this->mission_handler_, 
+        this->ground_station_logger_, this->manual_control_handler_, this->telemetry_publisher_,
+        this->maneuver_runner_
+      ),
+      ground_station_logger_(
+        // Do not use DJI Interface
+        this->mavlink_direct_server_,
+        this->state_manager_, this->flight_action_executor_, this->flight_primitives_,
+        this->mission_handler_, this->mission_executor_,
+        this->manual_control_handler_, this->telemetry_publisher_,
+        this->maneuver_runner_
+      ),
+      manual_control_handler_(
+        this->dji_,
+        // Do not use MAVSDK servers
+        this->state_manager_, this->flight_action_executor_, this->flight_primitives_,
+        this->mission_handler_, this->mission_executor_,
+        this->ground_station_logger_, this->telemetry_publisher_,
+        this->maneuver_runner_
+      ),
+      telemetry_publisher_(
+        this->dji_,
+        this->telemetry_server_, this->action_server_, this->mavlink_direct_server_,
+        this->state_manager_, this->flight_action_executor_, this->flight_primitives_,
+        this->mission_handler_, this->mission_executor_,
+        this->ground_station_logger_, this->manual_control_handler_,
+        this->maneuver_runner_
+      ),
+      maneuver_runner_(
+        this->state_manager_, this->flight_action_executor_, this->flight_primitives_,
+        this->mission_handler_, this->mission_executor_,
+        this->ground_station_logger_, this->manual_control_handler_, this->telemetry_publisher_
       ),
       telemetry_timer_(ioc)
 { 
@@ -92,6 +140,9 @@ MavlinkBridge::~MavlinkBridge()
     this->action_server_.unsubscribe_takeoff(this->takeoff_handle_);
     this->action_server_.unsubscribe_flight_mode_change(this->flight_mode_handle_);
 
+    // Join the maneuver thread while every module is still alive
+    this->maneuver_runner_.cancel();
+
     // Stop telemetry stream from DJI
     this->dji_.stop_telemetry_stream();
 }
@@ -103,7 +154,7 @@ bool MavlinkBridge::start()
     this->action_server_.set_allow_takeoff(false); // todo: testar efeito do bool
     this->action_server_.set_armable(true, true);    
     this->action_server_.set_disarmable(true, true);  
-    this->action_server_.set_flight_mode(FlightMode::Hold);
+    //this->action_server_.set_flight_mode(FlightMode::Hold);
 
     // Load parameters
     this->load_params(oceanpilot::Params::int_params);
@@ -145,7 +196,10 @@ bool MavlinkBridge::start()
 
     // Arm/Disarm action
     this->arm_disarm_handle_ = this->action_server_.subscribe_arm_disarm(
-        [this](Result result, mavsdk::ActionServer::ArmDisarm command) {
+        [this](Result /*result*/, mavsdk::ActionServer::ArmDisarm command) {
+            // set_armed_state() in the telemetry cycle re-enters here with force = true: ignore that echo.
+            if (command.force)
+                return;
             this->flight_action_executor_.handle_arm_disarm(command);
         }
     );
@@ -222,8 +276,18 @@ bool MavlinkBridge::on_outgoing_message(MavlinkMessage msg)
     if (msg.message_name == "COMMAND_ACK")
         return this->on_command_ack_outgoing_message(msg);
 
-    // if (msg.message_name == "HEARTBEAT")
-    //     std::cout << msg.fields_json << "\n";
+    if (msg.message_name == "HEARTBEAT")
+    {
+        auto custom_mode_str = extract_json_value(msg.fields_json, "custom_mode");
+        
+        // Destrói o heartbeat fantasma do MAVSDK (que envia custom_mode 0)
+        if (custom_mode_str && custom_mode_str.value() == "0") {
+            return false; 
+        }
+        
+        // Deixa o seu Heartbeat customizado passar
+        return true;
+    }
 
     return true; // Allow any other message
 }
@@ -234,29 +298,49 @@ bool MavlinkBridge::on_incoming_message(MavlinkMessage msg)
         return this->manual_control_handler_.handle_manual_control_message(msg);
 
     if (msg.message_name == "COMMAND_LONG")
-    {
-        auto command = extract_json_value(msg.fields_json, "command");
-    
-        std::string do_reposition_code = std::to_string(MavCmd::MAV_CMD_DO_REPOSITION);
+        return this->on_command_long_incoming_message(msg);
 
-        if (command == std::nullopt)
-            return false;
-        
-        if (command == do_reposition_code)
+    return true; // Pass any other message.
+}
+
+bool MavlinkBridge::on_command_long_incoming_message(const MavlinkMessage& msg)
+{
+    auto command = extract_json_value(msg.fields_json, "command");
+
+    if (command == std::nullopt)
+        return false;
+
+    // Change altitude
+    if (command == std::to_string(MavCmd::MAV_CMD_DO_REPOSITION))
+    {
+        auto param7_str = extract_json_value(msg.fields_json, "param7");
+        if (param7_str)
         {
-            auto param7_str = extract_json_value(msg.fields_json, "param7");
-            if (param7_str)
+            const float target_amsl = std::stof(param7_str.value());
+            if (std::isfinite(target_amsl))
             {
-                float target_amsl = std::stof(param7_str.value());
                 std::cout << "SOLICITANDO MUDANÇA DE ALTURA\n";
                 this->flight_action_executor_.execute_change_altitude(target_amsl);
             }
-                
-            return false;
         }
+        return false;
     }
 
-    return true; // Pass any other message.
+    // Start (or resume) the mission. Items range (param1/param2) is not supported yet.
+    if (command == std::to_string(MavCmd::MAV_CMD_MISSION_START))
+    {
+        const bool accepted = this->mission_executor_.start() || this->mission_executor_.is_active();
+
+        this->mavlink_direct_server_.send_message(
+            create_ack_mavlink_msg(
+                MavCmd::MAV_CMD_MISSION_START,
+                accepted ? MavResult::ACCEPTED : MavResult::DENIED
+            )
+        );
+        return false;
+    }
+
+    return true; // Pass any other command.
 }
 
 void MavlinkBridge::on_flight_mode_change(FlightMode mode)
@@ -265,11 +349,13 @@ void MavlinkBridge::on_flight_mode_change(FlightMode mode)
     {
         case FlightMode::Hold: 
             std::cout << "[MavlinkBridge] MUDAR Modo para: HOLD\n";
+            this->mission_executor_.pause(); // Pause = hold position, keeping the progress.
             this->state_manager_.request_flight_mode(FlightMode::Hold);
             break;
 
         case FlightMode::Posctl:
             std::cout << "[MavlinkBridge] MUDAR Modo para: POSITION\n";
+            this->mission_executor_.pause();
             this->state_manager_.request_flight_mode(FlightMode::Posctl);
             break;
 
@@ -284,12 +370,14 @@ void MavlinkBridge::on_flight_mode_change(FlightMode mode)
             break;
 
         case FlightMode::Takeoff:
-            std::cout << "[MavlinkBridge] MUDAR Modo para: TAKEOFF\n";
+            // Echo of the heartbeat; the takeoff itself arrives as MAV_CMD_NAV_TAKEOFF.
             break;
 
         case FlightMode::Mission:
             std::cout << "[MavlinkBridge] MUDAR Modo para: MISSION\n";
-            this->flight_action_executor_.execute_mission();
+            // Refused request (not an echo): revert the mode shown to the GCS.
+            if (!this->mission_executor_.start() && !this->mission_executor_.is_active())
+                this->telemetry_publisher_.invalidate_published_mode();
             break;
 
         default:

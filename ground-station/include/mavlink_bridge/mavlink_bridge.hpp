@@ -26,26 +26,34 @@
 #include <boost/asio/io_context.hpp>
 #include <boost/asio/steady_timer.hpp>
 
-// MAVSDK
+// DJI Interface
+#include "dji_interface/dji_interface.hpp"
+
+// MAVSDK API
 #include <mavsdk/mavsdk.hpp>
 #include <mavsdk/compatibility_mode.hpp>
 #include <mavsdk/autopilot.hpp>
 
+// MAVSDK Plugins
 #include <mavsdk/plugins/telemetry_server/telemetry_server.hpp>
 #include <mavsdk/plugins/action_server/action_server.hpp>
 #include <mavsdk/plugins/mavlink_direct_server/mavlink_direct_server.hpp>
 #include <mavsdk/plugins/param_server/param_server.hpp>
 #include <mavsdk/plugins/mission_raw_server/mission_raw_server.hpp>
 
-// Project modules
-#include "dji_interface/dji_interface.hpp"
-#include "mavlink_bridge/params/px4_params.hpp"
+// Composed modules
 #include "mavlink_bridge/flight_state_manager.hpp"
-#include "mavlink_bridge/telemetry_publisher.hpp"
 #include "mavlink_bridge/flight_action_executor.hpp"
-#include "mavlink_bridge/manual_control_handler.hpp"
+#include "mavlink_bridge/flight_primitives.hpp"
 #include "mavlink_bridge/mission_handler.hpp"
+#include "mavlink_bridge/mission_executor.hpp"
 #include "mavlink_bridge/ground_station_logger.hpp"
+#include "mavlink_bridge/manual_control_handler.hpp"
+#include "mavlink_bridge/telemetry_publisher.hpp"
+#include "mavlink_bridge/maneuver_runner.hpp"
+
+// Parameter definitions
+#include "mavlink_bridge/params/px4_params.hpp"
 
 
 /* Definitions  --------------------------------------------------------------*/
@@ -93,7 +101,12 @@ public:
         const GroundStationSocketConfig ground_station_socket
     );
 
-    /// @brief Destructor for MavlinkBridge.
+    /**
+     * @brief Destructor for MavlinkBridge.
+     * 
+     * Order: stop the telemetry timer, unsubscribe every MAVSDK callback, 
+     * cancel the maneuver runner explicitly, and only then stop the DJI stream.
+     */
     ~MavlinkBridge();
 
     /// @brief Start connection to ground station.
@@ -171,13 +184,21 @@ private:
     // --------------------------
     // COMPOSED MODULES
     // --------------------------
+    //
+    // Declaration order matters: members are destroyed in reverse order. 
+    // The maneuver runner is declared LAST so it is destroyed first and joins 
+    // the maneuver thread while every other module is still alive. The 
+    // initializer list of the constructor must follow this exact order.
 
     FlightStateManager   state_manager_;          ///< Thread-safe state machine for flight modes and maneuvers.
-    TelemetryPublisher   telemetry_publisher_;    ///< Telemetry and heartbeat publisher module.
-    FlightActionExecutor flight_action_executor_; ///< Asynchronous executor for takeoff, land, rtl, change altitude and missions.
-    ManualControlHandler manual_control_handler_; ///< Handler for DJI Virtual Stick and MANUAL_CONTROL inputs.
-    MissionHandler       mission_handler_;        ///< Handler for incoming waypoint missions.
+    FlightActionExecutor flight_action_executor_; ///< Entry points for takeoff, land, rtl, change altitude and go-to.
+    FlightPrimitives     flight_primitives_;      ///< Blocking and cancellable flight operations.
+    MissionHandler       mission_handler_;        ///< Mission plan storage and progress reporter.
+    MissionExecutor      mission_executor_;       ///< Mission interpreter with pause and resume.
     GroundStationLogger  ground_station_logger_;  ///< Logger utility for dispatching STATUSTEXT messages and alerts to the GCS.
+    ManualControlHandler manual_control_handler_; ///< Handler for DJI Virtual Stick and MANUAL_CONTROL inputs.
+    TelemetryPublisher   telemetry_publisher_;    ///< Telemetry and heartbeat publisher module.
+    ManeuverRunner       maneuver_runner_;        ///< Owner of the single maneuver thread.
 
     // --------------------------
     // SUBSCRIPTION HANDLES
@@ -209,10 +230,30 @@ private:
     /// @brief Intercepts outgoing MAVLink messages to drop unwanted auto-ACKs.
     bool on_outgoing_message(mavsdk::Mavsdk::MavlinkMessage msg);
 
-    /// @brief Intercepts incoming MAVLink messages such as MANUAL_CONTROL.
+    /// @brief Intercepts incoming MAVLink messages such as MANUAL_CONTROL and COMMAND_LONG.
     bool on_incoming_message(mavsdk::Mavsdk::MavlinkMessage msg);
 
-    /// @brief Handles incoming flight mode change requests from the Ground Station.
+    /**
+     * @brief Routes COMMAND_LONG messages that MAVSDK does not handle.
+     * 
+     * Handles MAV_CMD_DO_REPOSITION (altitude change or go-to) and 
+     * MAV_CMD_MISSION_START.
+     * 
+     * @param msg The raw COMMAND_LONG message.
+     * @return false if the message was consumed, true to let MAVSDK process it.
+     */
+    bool on_command_long_incoming_message(const mavsdk::Mavsdk::MavlinkMessage& msg);
+
+    /**
+     * @brief Handles incoming flight mode change requests from the Ground Station.
+     * 
+     * Mission starts or resumes the mission (ignored when already active), Hold 
+     * pauses a running mission and requests Hold, Land and ReturnToLaunch 
+     * preempt any maneuver. Takeoff is ignored (heartbeat echo, the takeoff 
+     * itself arrives as MAV_CMD_NAV_TAKEOFF).
+     * 
+     * @param mode The flight mode requested by the GCS.
+     */
     void on_flight_mode_change(mavsdk::ActionServer::FlightMode mode);
 
     /// @brief Filters outgoing COMMAND_ACK messages to block default MAVSDK takeoff ACKs.

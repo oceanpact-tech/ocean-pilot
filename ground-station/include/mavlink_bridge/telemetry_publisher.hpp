@@ -26,7 +26,7 @@
 #include <mavsdk/plugins/mavlink_direct_server/mavlink_direct_server.hpp>
 
 #include "dji_interface/dji_interface.hpp"
-#include "mavlink_bridge/flight_state_manager.hpp"
+#include "mavlink_bridge/module_fwd.hpp"
 
 
 /* Classes  ------------------------------------------------------------------*/
@@ -38,6 +38,9 @@
  * and ActionServer state setters (armed state and flight mode). It queries 
  * FlightStateManager and DJIInterface on every cycle to keep QGroundControl 
  * synchronized with the physical aircraft.
+ * 
+ * Module references are stored for future extensions and must not be used 
+ * during construction or destruction.
  */
 class TelemetryPublisher 
 {
@@ -45,18 +48,35 @@ public:
 
     /**
      * @brief Constructor for TelemetryPublisher.
-     * @param dji                   Reference to the DJI hardware interface.
-     * @param state_manager         Const reference to the flight state manager.
-     * @param telemetry_server      Reference to the MAVSDK telemetry server plugin.
-     * @param action_server         Reference to the MAVSDK action server plugin.
-     * @param mavlink_direct_server Reference to the MAVSDK direct message plugin.
+     * @param dji                    Reference to the DJI hardware interface.
+     * @param telemetry_server       Reference to the MAVSDK telemetry server plugin.
+     * @param action_server          Reference to the MAVSDK action server plugin.
+     * @param mavlink_direct_server  Reference to the MAVSDK direct message plugin (mavsdk server).
+     * @param state_manager          Reference to the flight state manager (composed module).
+     * @param flight_action_executor Reference to the flight action executor (composed module).
+     * @param flight_primitives      Reference to the flight primitives (composed module).
+     * @param mission_handler        Reference to the mission handler (composed module).
+     * @param mission_executor       Reference to the mission executor (composed module).
+     * @param ground_station_logger  Reference to the ground station logger (composed module).
+     * @param manual_control_handler Reference to the manual control handler (composed module).
+     * @param maneuver_runner        Reference to the maneuver runner (composed module).
      */
     TelemetryPublisher(
+        // DJI API
         DJIInterface& dji,
-        const FlightStateManager& state_manager,
+        // MAVSDK API
         mavsdk::TelemetryServer& telemetry_server,
         mavsdk::ActionServer& action_server,
-        mavsdk::MavlinkDirectServer& mavlink_direct_server
+        mavsdk::MavlinkDirectServer& mavlink_direct_server,
+        // Composed modules
+        FlightStateManager&   state_manager,
+        FlightActionExecutor& flight_action_executor,
+        FlightPrimitives&     flight_primitives,
+        MissionHandler&       mission_handler,
+        MissionExecutor&      mission_executor,
+        GroundStationLogger&  ground_station_logger,
+        ManualControlHandler& manual_control_handler,
+        ManeuverRunner&       maneuver_runner
     );
 
     /// @brief Destructor for TelemetryPublisher.
@@ -74,11 +94,24 @@ private:
     // CORE REFERENCES
     // --------------------------
 
-    DJIInterface&                dji_;                   ///< DJI interface for telemetry polling.
-    const FlightStateManager&    state_manager_;         ///< State manager for mode and maneuver queries.
-    mavsdk::TelemetryServer&     telemetry_server_;      ///< MAVSDK telemetry server instance.
-    mavsdk::ActionServer&        action_server_;         ///< MAVSDK action server instance.
-    mavsdk::MavlinkDirectServer& mavlink_direct_server_; ///< MAVSDK direct server instance.
+    DJIInterface&                dji_;                   ///< DJI interface for telemetry polling and command dispatch.
+    mavsdk::TelemetryServer&     telemetry_server_;      ///< MAVSDK telemetry server.
+    mavsdk::ActionServer&        action_server_;         ///< MAVSDK action server.
+    mavsdk::MavlinkDirectServer& mavlink_direct_server_; ///< MAVSDK direct server for dispatching custom messages.
+
+
+    // --------------------------
+    // COMPOSED MODULES
+    // --------------------------
+
+    FlightStateManager&   state_manager_;          ///< Thread-safe state machine for flight modes and maneuvers.
+    FlightActionExecutor& flight_action_executor_; ///< Entry points for takeoff, land, rtl, change altitude and go-to.
+    FlightPrimitives&     flight_primitives_;      ///< Blocking and cancellable flight operations.
+    MissionHandler&       mission_handler_;        ///< Mission plan storage and progress reporter.
+    MissionExecutor&      mission_executor_;       ///< Mission interpreter with pause and resume.
+    GroundStationLogger&  ground_station_logger_;  ///< Logger utility for dispatching STATUSTEXT messages and alerts to the GCS.
+    ManualControlHandler& manual_control_handler_; ///< Handler for DJI Virtual Stick and MANUAL_CONTROL inputs.
+    ManeuverRunner&       maneuver_runner_;        ///< Owner of the single maneuver thread.
 
 
     // --------------------------

@@ -1,12 +1,11 @@
 /**
  ******************************************************************************
  * @file    flight_action_executor.cpp
- * @brief   Implementation of asynchronous autonomous flight maneuvers.
+ * @brief   Implementation of the flight command entry points.
  *
- * This file implements the FlightActionExecutor class. It handles Arm/Disarm 
- * verification and manages cooperative std::jthread workers for Takeoff and 
- * Land sequences, ensuring safe teardown via std::stop_token and automatic 
- * state restoration via FlightStateManager::ActionScope.
+ * This file implements the FlightActionExecutor class. Each command validates 
+ * its preconditions, sends the COMMAND_ACK feedback and runs a maneuver body 
+ * on the ManeuverRunner thread through FlightPrimitives.
  *
  * @author  Thiago Marques de Oliveira
  * @date    October, 2026
@@ -17,61 +16,88 @@
 
 #include "mavlink_bridge/flight_action_executor.hpp"
 
-#include <atomic>
-#include <chrono>
-#include <memory>
-#include <utility>
+#include <cstdint>
+#include <format>
+#include <optional>
 
+// Composed modules
+#include "mavlink_bridge/flight_state_manager.hpp"
+#include "mavlink_bridge/flight_primitives.hpp"
+#include "mavlink_bridge/flight_action_executor.hpp"
+#include "mavlink_bridge/mission_handler.hpp"
+#include "mavlink_bridge/mission_executor.hpp"
+#include "mavlink_bridge/ground_station_logger.hpp"
+#include "mavlink_bridge/manual_control_handler.hpp"
+#include "mavlink_bridge/telemetry_publisher.hpp"
+#include "mavlink_bridge/maneuver_runner.hpp"
+
+// Mavlink types
 #include "mavlink_bridge/custom_types/mav_cmd.hpp"
 #include "mavlink_bridge/custom_types/mav_result.hpp"
+#include "mavlink_bridge/custom_types/mav_severity.hpp"
+
+// Helpers
 #include "mavlink_bridge/utils/mavlink_json_utils.hpp"
-#include "mavlink_bridge/utils/http_response_utils.hpp"
+
+
+/* Aliases -------------------------------------------------------------------*/
+
+using Maneuver = FlightStateManager::ActiveManeuver;
+using Scope    = FlightStateManager::ActionScope;
+using Policy   = ManeuverRunner::Policy;
+
+
+/* Local helpers -------------------------------------------------------------*/
+
+namespace
+{
+    /// @brief Maps an Outcome to the MAV_RESULT of the final ACK. Empty when no ACK must be sent (cancellation).
+    std::optional<uint8_t> ack_for(Outcome outcome)
+    {
+        switch (outcome)
+        {
+            case Outcome::Done:       return MavResult::ACCEPTED;
+            case Outcome::Cancelled:  return std::nullopt;
+            case Outcome::Failed:
+            case Outcome::Timeout:
+            case Outcome::Overridden: return MavResult::FAILED;
+        }
+        return MavResult::FAILED;
+    }
+}
 
 
 /* Public Class Methods ------------------------------------------------------*/
 
 FlightActionExecutor::FlightActionExecutor(
+    // DJI API
     DJIInterface& dji,
-    FlightStateManager& state_manager,
+    // MAVSDK API
     mavsdk::MavlinkDirectServer& mavlink_direct_server,
-    mavsdk::ActionServer& action_server,
+    // Composed modules
+    FlightStateManager& state_manager,
+    FlightPrimitives& flight_primitives,
+    MissionHandler& mission_handler,
+    MissionExecutor& mission_executor,
     GroundStationLogger& ground_station_logger,
-    MissionHandler& mission_handler
+    ManualControlHandler& manual_control_handler,
+    TelemetryPublisher& telemetry_publisher,
+    ManeuverRunner& maneuver_runner
 )
-    : dji_(dji),
-      state_manager_(state_manager),
+    : // DJI API
+      dji_(dji),
+      // MAVSDK API
       mavlink_direct_server_(mavlink_direct_server),
-      action_server_(action_server),
-      gs_logger_(ground_station_logger),
-      mission_handler_(mission_handler)
+      // Composed modules
+      state_manager_(state_manager),
+      flight_primitives_(flight_primitives),
+      mission_handler_(mission_handler),
+      mission_executor_(mission_executor),
+      ground_station_logger_(ground_station_logger),
+      manual_control_handler_(manual_control_handler),
+      telemetry_publisher_(telemetry_publisher),
+      maneuver_runner_(maneuver_runner)
 {
-}
-
-FlightActionExecutor::~FlightActionExecutor()
-{
-    if (this->takeoff_worker_.joinable())
-    {
-        this->takeoff_worker_.request_stop();
-        this->takeoff_worker_.join();
-    }
-
-    if (this->land_worker_.joinable())
-    {
-        this->land_worker_.request_stop();
-        this->land_worker_.join();
-    }
-
-    if (this->rtl_worker_.joinable())
-    {
-        this->rtl_worker_.request_stop();
-        this->rtl_worker_.join();
-    }
-
-    if (this->change_altitude_worker_.joinable())
-    {
-        this->change_altitude_worker_.request_stop();
-        this->change_altitude_worker_.join();
-    }
 }
 
 void FlightActionExecutor::handle_arm_disarm(const mavsdk::ActionServer::ArmDisarm& command)
@@ -81,501 +107,171 @@ void FlightActionExecutor::handle_arm_disarm(const mavsdk::ActionServer::ArmDisa
     {
         if (!this->dji_.is_ready_to_takeoff())
         {
-            this->send_command_ack(
-                MavCmd::MAV_CMD_COMPONENT_ARM_DISARM, 
-                MavResult::DENIED
-            );
+            this->send_command_ack(MavCmd::MAV_CMD_COMPONENT_ARM_DISARM, MavResult::DENIED);
             return;
         }
 
-        this->send_command_ack(
-            MavCmd::MAV_CMD_COMPONENT_ARM_DISARM, 
-            MavResult::ACCEPTED
-        );
+        this->send_command_ack(MavCmd::MAV_CMD_COMPONENT_ARM_DISARM, MavResult::ACCEPTED);
         return;
     }
 
-    // Command = DISARM
-    if (!command.arm)
-    {
-        return;
-    }
+    // Command = DISARM. The DJI SDK cannot disarm, so answer instead of letting the GCS time out.
+    this->send_command_ack(MavCmd::MAV_CMD_COMPONENT_ARM_DISARM, MavResult::DENIED);
 }
 
 void FlightActionExecutor::execute_takeoff()
 {
-    auto scope = this->state_manager_.try_begin_maneuver(FlightStateManager::ActiveManeuver::Takeoff);
-    if (!scope)
-        return; // Another maneuver is already active.
-
-    this->takeoff_worker_ = std::jthread(
-        [this, scope = std::move(*scope)](std::stop_token stoken) mutable 
+    const bool started = this->maneuver_runner_.run(
+        Maneuver::Takeoff, Policy::RejectIfBusy,
+        [this](std::stop_token stoken, Scope& scope)
         {
             if (!this->dji_.is_ready_to_takeoff())
             {
-                this->send_command_ack(
-                    MavCmd::MAV_CMD_NAV_TAKEOFF, 
-                    MavResult::DENIED
-                );
-                return; // ActionScope destructor restores previous mode.
+                this->send_command_ack(MavCmd::MAV_CMD_NAV_TAKEOFF, MavResult::DENIED);
+                return; // ActionScope destructor returns to Hold.
             }
 
-            // Send immediate IN_PROGRESS ACK to prevent QGC 500ms command timeout.
-            this->send_command_ack(
-                MavCmd::MAV_CMD_NAV_TAKEOFF, 
-                MavResult::IN_PROGRESS
+            // Immediate IN_PROGRESS ACK to prevent the QGC 500ms command timeout.
+            this->send_command_ack(MavCmd::MAV_CMD_NAV_TAKEOFF, MavResult::IN_PROGRESS);
+
+            const Outcome outcome = this->flight_primitives_.takeoff(
+                scope, stoken,
+                [this]() { this->send_command_ack(MavCmd::MAV_CMD_NAV_TAKEOFF, MavResult::IN_PROGRESS); }
             );
 
-            auto http_success = std::make_shared<std::atomic<bool>>(false);
-            auto http_done    = std::make_shared<std::atomic<bool>>(false);
+            if (const auto result = ack_for(outcome))
+                this->send_command_ack(MavCmd::MAV_CMD_NAV_TAKEOFF, *result);
 
-            this->dji_.request_takeoff([http_success, http_done](bool success) {
-                *http_success = success;
-                *http_done    = true;
-            });
-
-            bool takeoff_started = false;
-
-            // Wait takeoff start for up to 10 seconds (40 * 250ms).
-            for (int i = 0; i < 40 && !stoken.stop_requested(); i++)
-            {
-                if (*http_done && !(*http_success))
-                    break;
-
-                if (this->dji_.get_drone_status() == "TAKING_OFF")
-                {
-                    takeoff_started = true;
-                    break;
-                }
-
-                this->send_command_ack(
-                    MavCmd::MAV_CMD_NAV_TAKEOFF, 
-                    MavResult::IN_PROGRESS
-                );
-
-                std::this_thread::sleep_for(std::chrono::milliseconds(250));
-            }
-
-            if (stoken.stop_requested())
-                return;
-
-            // If takeoff has not started, send FAILED.
-            if (!takeoff_started)
-            {
-                this->send_command_ack(
-                    MavCmd::MAV_CMD_NAV_TAKEOFF, 
-                    MavResult::FAILED
-                );
-                return; // ActionScope destructor restores previous mode.
-            }
-
-            // Send IN_PROGRESS until takeoff is done.
-            while (!stoken.stop_requested() && this->dji_.get_drone_status() != "IDLE")
-            {
-                this->send_command_ack(
-                    MavCmd::MAV_CMD_NAV_TAKEOFF, 
-                    MavResult::IN_PROGRESS
-                );
-                std::this_thread::sleep_for(std::chrono::milliseconds(100));
-            }
-
-            if (stoken.stop_requested())
-                return;
-
-            // Send ACCEPTED when task is over.
-            this->send_command_ack(
-                MavCmd::MAV_CMD_NAV_TAKEOFF, 
-                MavResult::ACCEPTED
-            );
-
-            // Mark maneuver as succeeded so ActionScope transitions to Hold.
-            scope.succeed();
+            if (outcome == Outcome::Done)
+                scope.succeed();
         }
     );
+
+    if (!started)
+        this->send_command_ack(MavCmd::MAV_CMD_NAV_TAKEOFF, MavResult::TEMPORARILY_REJECTED);
 }
 
 void FlightActionExecutor::execute_land()
 {
-    auto scope = this->state_manager_.try_begin_maneuver(FlightStateManager::ActiveManeuver::Land);
-    if (!scope)
-        return; // Another maneuver is already active.
+    // The heartbeat echoes the Land mode back as a mode-change request: ignore it while landing.
+    if (this->state_manager_.get_active_maneuver() == Maneuver::Land)
+        return;
 
-    this->land_worker_ = std::jthread(
-        [this, scope = std::move(*scope)](std::stop_token stoken) mutable 
+    this->maneuver_runner_.run(
+        Maneuver::Land, Policy::PreemptCurrent,
+        [this](std::stop_token stoken, Scope& scope)
         {
             if (!this->dji_.is_armed())
-                return; // ActionScope destructor restores previous mode.
-
-            auto http_success = std::make_shared<std::atomic<bool>>(false);
-            auto http_done    = std::make_shared<std::atomic<bool>>(false);
-
-            this->dji_.request_land([http_success, http_done](bool success) {
-                *http_success = success;
-                *http_done    = true;
-            });
-
-            bool landing_started = false;
-
-            // Wait land start for up to 10 seconds (40 * 250ms).
-            for (int i = 0; i < 40 && !stoken.stop_requested(); i++)
             {
-                if (*http_done && !(*http_success))
-                    break;
-
-                if (this->dji_.get_drone_status() == "LANDING")
-                {
-                    landing_started = true;
-                    break;
-                }
-
-                std::this_thread::sleep_for(std::chrono::milliseconds(250));
-            }
-
-            if (stoken.stop_requested() || !landing_started)
-                return; // ActionScope destructor restores previous mode.
-
-            // Wait until landing is done (status is IDLE or motors disarm).
-            while (!stoken.stop_requested()                &&
-                   this->dji_.get_drone_status() != "IDLE" &&
-                   this->dji_.is_armed())
-            {
-                std::this_thread::sleep_for(std::chrono::milliseconds(250));
-            }
-
-            if (stoken.stop_requested())
+                this->ground_station_logger_.send_message(MavSeverity::WARNING, "Land refused: drone is not armed");
                 return;
+            }
 
-            // Mark maneuver as succeeded so ActionScope transitions to Hold.
-            scope.succeed();
+            const Outcome outcome = this->flight_primitives_.land(scope, stoken);
+
+            if (outcome == Outcome::Done)
+                scope.succeed();
+            else if (outcome != Outcome::Cancelled)
+                this->ground_station_logger_.send_message(MavSeverity::ERROR, std::format("Landing {}", to_string(outcome)));
         }
     );
 }
 
 void FlightActionExecutor::execute_return_to_launch()
 {
-    auto scope = this->state_manager_.try_begin_maneuver(FlightStateManager::ActiveManeuver::ReturnToLaunch);
-    if (!scope)
-        return; // Another maneuver is already active.
+    // Same echo protection as the landing.
+    if (this->state_manager_.get_active_maneuver() == Maneuver::ReturnToLaunch)
+        return;
 
-    this->rtl_worker_ = std::jthread(
-        [this, scope = std::move(*scope)](std::stop_token stoken) mutable 
+    this->maneuver_runner_.run(
+        Maneuver::ReturnToLaunch, Policy::PreemptCurrent,
+        [this](std::stop_token stoken, Scope& scope)
         {
             if (!this->dji_.is_armed())
-                return;  // ActionScope destructor restores previous mode.
-
-            auto http_success = std::make_shared<std::atomic<bool>>(false);
-            auto http_done    = std::make_shared<std::atomic<bool>>(false);
-
-            this->dji_.request_return_to_home([http_success, http_done](bool success) {
-                *http_success = success;
-                *http_done    = true;
-            });
-
-            bool rtl_started = false;
-
-            // Wait land start for up to 10 seconds (40 * 250ms).
-            for (int i = 0; i < 40 && !stoken.stop_requested(); i++)
             {
-                if (*http_done && !(*http_success))
-                    break;
-
-                if (this->dji_.get_drone_status() == "RETURNING_HOME")
-                {
-                    rtl_started = true;
-                    break;
-                }
-                std::this_thread::sleep_for(std::chrono::milliseconds(250));
-            }
-
-            if (stoken.stop_requested() || !rtl_started)
-                return; // ActionScope destructor restores previous mode.
-
-            // Wait until landing is done (status is IDLE or motors disarm).
-            while (!stoken.stop_requested() && 
-                   this->dji_.get_drone_status() != "IDLE" &&
-                   this->dji_.is_armed())
-            {
-                std::this_thread::sleep_for(std::chrono::milliseconds(250));
-            }
-
-            if (stoken.stop_requested())
+                this->ground_station_logger_.send_message(MavSeverity::WARNING, "RTL refused: drone is not armed");
                 return;
+            }
 
-            // Mark maneuver as succeeded so ActionScope transitions to Hold.
-            scope.succeed();
+            const Outcome outcome = this->flight_primitives_.return_to_launch(scope, stoken);
+
+            if (outcome == Outcome::Done)
+                scope.succeed();
+            else if (outcome != Outcome::Cancelled)
+                this->ground_station_logger_.send_message(MavSeverity::ERROR, std::format("RTL {}", to_string(outcome)));
         }
     );
+}
+
+void FlightActionExecutor::execute_change_altitude(float target_altitude_amsl)
+{
+    const bool started = this->maneuver_runner_.run(
+        Maneuver::Reposition, Policy::RejectIfBusy,
+        [this, target_altitude_amsl](std::stop_token stoken, Scope& scope)
+        {
+            if (!this->dji_.is_armed() || this->dji_.is_manual_override_active())
+            {
+                this->send_command_ack(MavCmd::MAV_CMD_DO_REPOSITION, MavResult::DENIED);
+                return;
+            }
+
+            this->send_command_ack(MavCmd::MAV_CMD_DO_REPOSITION, MavResult::IN_PROGRESS);
+
+            const float target_altitude_rel = target_altitude_amsl - static_cast<float>(this->dji_.get_home_altitude());
+
+            const Outcome outcome = this->flight_primitives_.change_altitude(
+                scope, target_altitude_rel, stoken,
+                [this]() { this->send_command_ack(MavCmd::MAV_CMD_DO_REPOSITION, MavResult::IN_PROGRESS); }
+            );
+
+            if (const auto result = ack_for(outcome))
+                this->send_command_ack(MavCmd::MAV_CMD_DO_REPOSITION, *result);
+
+            if (outcome == Outcome::Done)
+                scope.succeed();
+        }
+    );
+
+    if (!started)
+        this->send_command_ack(MavCmd::MAV_CMD_DO_REPOSITION, MavResult::TEMPORARILY_REJECTED);
 }
 
 void FlightActionExecutor::execute_navigate_to_waypoint(const Location3D& waypoint)
 {
-    // Wait untill previous actions is concluded. Blocking.
-    if (this->change_altitude_worker_.joinable())
-        this->change_altitude_worker_.join();
+    WaypointCommand command;
+    command.target       = waypoint;
+    command.speed_m_s    = 5.0f;
+    command.heading_mode = HeadingMode::NoseForward;
 
-    this->is_navigating_to_waypoint_ = true;
-
-    this->navigate_to_waypoint_worker_ = std::jthread(
-        [this, waypoint](std::stop_token stoken) 
+    const bool started = this->maneuver_runner_.run(
+        Maneuver::Reposition, Policy::RejectIfBusy,
+        [this, command](std::stop_token stoken, Scope& scope)
         {
-            if (!this->dji_.is_armed() ||
-                this->dji_.is_manual_override_active())
+            if (!this->dji_.is_armed() || this->dji_.is_manual_override_active())
             {
-                std::this_thread::sleep_for(std::chrono::milliseconds(5000));
-            }
-
-            std::string payload = std::to_string(waypoint.latitude/10e6) + "," + std::to_string(waypoint.longitude/10e6) + "," + std::to_string(waypoint.altitude) + "," + std::to_string(this->dji_.get_attitude().yaw) + ",5.0";
-
-            while(true)
-            {
-                auto http_success = std::make_shared<std::atomic<bool>>(false);
-                auto http_done    = std::make_shared<std::atomic<bool>>(false);
-                auto response_ptr = std::make_shared<std::string>();
-
-                std::cout << payload << "\n";
-
-                this->dji_.go_to_waypoint_nose_forward(
-                    payload,
-                    [http_success, http_done, response_ptr](bool success, std::string response) {
-                        *http_success = success;
-                        *response_ptr = response;
-                        *http_done    = true;
-                    }
-                );
-
-                bool wp_started = false;
-
-                // Wait 10s http conclude.
-                for (int i = 0; i < 40 && !stoken.stop_requested(); i++)
-                {
-                    if (*http_done && !(*http_success))
-                        break;
-                    std::this_thread::sleep_for(std::chrono::milliseconds(250));
-                }
-
-                for (int i = 0; i < 40 && !stoken.stop_requested(); i++)
-                {
-                    if (this->dji_.get_drone_status() == "NAVIGATING")
-                    {
-                        wp_started = true;
-                        break;
-                    }
-                    std::this_thread::sleep_for(std::chrono::milliseconds(250));
-                }
-
-
-                if (stoken.stop_requested())
-                    return;
-                if (!wp_started)
-                    continue;
-
-                std::cout << *response_ptr << "\n";
-
-                // Wait until landing is done (status is IDLE or motors disarm).
-                while (!stoken.stop_requested()                 &&
-                       this->dji_.get_drone_status() != "IDLE")
-                {
-                    std::this_thread::sleep_for(std::chrono::milliseconds(250));
-                }
-
-                if (stoken.stop_requested())
-                    return;
-
-                int seq_id = extract_waypoint_seq(*response_ptr);
-                std::cout << "WAYPOINT [" << seq_id << "]: rechead -" << this->dji_.is_waypoint_reached(seq_id) << "\n";
-
-                if (!this->dji_.is_waypoint_reached(seq_id))
-                {
-                    std::cout << "TENTANDO NOVAMENTE WAYPOINT\n";
-                    continue;
-                }
-                else
-                {
-                    break;
-                }
-            }
-
-            this->is_navigating_to_waypoint_ = false;
-        }
-    );
-}
-
-void FlightActionExecutor::execute_change_altitude(const float& target_altitude_amsl)
-{
-    if (this->is_changing_altitude_)
-    {
-        this->send_command_ack(
-            MavCmd::MAV_CMD_DO_REPOSITION,
-            MavResult::TEMPORARILY_REJECTED
-        );
-        return;
-    }
-
-    // Wait untill previous actions is concluded. Blocking.
-    if (this->change_altitude_worker_.joinable())
-        this->change_altitude_worker_.join();
-
-    this->is_changing_altitude_ = true;
-
-    this->change_altitude_worker_ = std::jthread(
-        [this, target_altitude_amsl](std::stop_token /*stoken*/) 
-        {
-            if (!this->dji_.is_armed() ||
-                this->dji_.is_manual_override_active())
-            {
-                this->send_command_ack(
-                    MavCmd::MAV_CMD_DO_REPOSITION, 
-                    MavResult::DENIED
-                );
-                this->is_changing_altitude_ = false;
+                this->send_command_ack(MavCmd::MAV_CMD_DO_REPOSITION, MavResult::DENIED);
                 return;
             }
 
-            // Send immediate IN_PROGRESS ACK to prevent QGC 500ms command timeout.
-            this->send_command_ack(
-                MavCmd::MAV_CMD_DO_REPOSITION, 
-                MavResult::IN_PROGRESS
+            this->send_command_ack(MavCmd::MAV_CMD_DO_REPOSITION, MavResult::IN_PROGRESS);
+
+            const Outcome outcome = this->flight_primitives_.go_to_waypoint(
+                scope, command, stoken,
+                [this]() { this->send_command_ack(MavCmd::MAV_CMD_DO_REPOSITION, MavResult::IN_PROGRESS); }
             );
 
-            // Calculate target altitude 
-            float home_amsl = this->dji_.get_home_altitude();
-            float target_altitude_agl = target_altitude_amsl - home_amsl;
+            if (const auto result = ack_for(outcome))
+                this->send_command_ack(MavCmd::MAV_CMD_DO_REPOSITION, *result);
 
-            if (target_altitude_agl < 1.0f) 
-                target_altitude_agl = 1.0f;
-
-            // Send HTTP requisition
-            auto http_success = std::make_shared<std::atomic<bool>>(false);
-            auto http_done    = std::make_shared<std::atomic<bool>>(false);
-
-            this->dji_.go_to_altitude_by_position(target_altitude_agl, 
-                [http_success, http_done](bool success) {
-                    *http_success = success;
-                    *http_done    = true;
-                });
-
-            bool change_altitude_started = false;
-
-            // Wait change altitude start for up to 10 seconds (40 * 250ms).
-            for (int i = 0; i < 40; i++)
-            {
-                if (*http_done && !(*http_success))
-                    break;
-
-                if (this->dji_.get_drone_status() == "NAVIGATING")
-                {
-                    change_altitude_started = true;
-                    break;
-                }
-
-                this->send_command_ack(
-                    MavCmd::MAV_CMD_DO_REPOSITION, 
-                    MavResult::IN_PROGRESS
-                );
-
-                std::this_thread::sleep_for(std::chrono::milliseconds(250));
-            }
-
-            // If change altitude has not started, send FAILED.
-            if (!change_altitude_started)
-            {
-                this->send_command_ack(
-                    MavCmd::MAV_CMD_DO_REPOSITION, 
-                    MavResult::FAILED
-                );
-                return;
-            }
-
-            // Send IN_PROGRESS until new altitude is reached.
-            while (this->dji_.get_drone_status() != "IDLE" &&
-                   this->dji_.get_drone_status() != "HOVERING")
-            {
-                this->send_command_ack(
-                    MavCmd::MAV_CMD_DO_REPOSITION, 
-                    MavResult::IN_PROGRESS
-                );
-                std::this_thread::sleep_for(std::chrono::milliseconds(100));
-            }
-
-            this->send_command_ack(
-                MavCmd::MAV_CMD_DO_REPOSITION, 
-                MavResult::ACCEPTED
-            );
-            
-            // Allow next request
-            this->is_changing_altitude_ = false; 
+            if (outcome == Outcome::Done)
+                scope.succeed();
         }
     );
+
+    if (!started)
+        this->send_command_ack(MavCmd::MAV_CMD_DO_REPOSITION, MavResult::TEMPORARILY_REJECTED);
 }
 
-void FlightActionExecutor::execute_mission()
-{
-    std::vector<mavsdk::MissionRawServer::MissionItem> mission_items =
-        this->get_latest_mission_plan().mission_items;
-
-    if (mission_items.empty())
-        return;
-
-    if (this->is_on_mission.exchange(true))
-        return;
-
-    // Finish running mission before start a new one.
-    if (this->mission_worker_.joinable())
-        this->mission_worker_.join(); // Wait for running mission thread finish.
-
-    this->mission_worker_ = std::jthread(
-        [this, mission_items](std::stop_token /*stoken*/)
-        {
-            for (const auto& item : mission_items)
-            {
-                switch (item.command)
-                {
-                case MavCmd::MAV_CMD_NAV_TAKEOFF:
-                    this->execute_takeoff();
-                    if (this->takeoff_worker_.joinable())
-                        this->takeoff_worker_.join(); // Wait for takeoff finish.
-                    this->mission_handler_.set_current_item_complete();
-                    break;
-
-                case MavCmd::MAV_CMD_NAV_LAND:
-                    this->execute_land();
-                    if (this->land_worker_.joinable())
-                        this->land_worker_.join(); // Wait for land finish.
-                    this->mission_handler_.set_current_item_complete();
-                    break;
-
-                case MavCmd::MAV_CMD_NAV_RETURN_TO_LAUNCH:
-                    this->execute_return_to_launch();
-                    if (this->rtl_worker_.joinable())
-                        this->rtl_worker_.join(); // Wait for land finish.
-                    this->mission_handler_.set_current_item_complete();
-                    break;
-
-                case MavCmd::MAV_CMD_NAV_WAYPOINT:
-                {
-                    Location3D waypoint;
-                    waypoint.latitude  = item.x;
-                    waypoint.longitude = item.y;
-                    waypoint.altitude  = item.z;
-                    
-                    this->execute_navigate_to_waypoint(waypoint);
-                    
-                    if (this->navigate_to_waypoint_worker_.joinable())
-                        this->navigate_to_waypoint_worker_.join(); // Wait for land finish.
-                    
-                        this->mission_handler_.set_current_item_complete();
-                    break;
-                }
-
-                default:
-                    break;
-                }
-            }
-            this->is_on_mission = false;
-            this->action_server_.set_flight_mode(mavsdk::ActionServer::FlightMode::Hold);
-        }
-    );
-}
 
 /* Private Class Methods -----------------------------------------------------*/
 

@@ -6,7 +6,7 @@
  * This file implements the FlightStateManager class. It coordinates mode 
  * transitions requested by the Ground Control Station, handles pilot manual 
  * overrides, and provides RAII scope guards (ActionScope) for asynchronous 
- * Takeoff and Land maneuvers under a single mutex.
+ * maneuvers under a single mutex.
  *
  * @author  Thiago Marques de Oliveira
  * @date    October, 2026
@@ -16,10 +16,39 @@
 /* Includes ------------------------------------------------------------------*/
 
 #include "mavlink_bridge/flight_state_manager.hpp"
-#include "mavlink_bridge/flight_action_executor.hpp"
 
+// Composed modules
+#include "mavlink_bridge/flight_state_manager.hpp"
+#include "mavlink_bridge/flight_primitives.hpp"
+#include "mavlink_bridge/mission_handler.hpp"
+#include "mavlink_bridge/mission_executor.hpp"
+#include "mavlink_bridge/ground_station_logger.hpp"
+#include "mavlink_bridge/manual_control_handler.hpp"
+#include "mavlink_bridge/telemetry_publisher.hpp"
+#include "mavlink_bridge/maneuver_runner.hpp"
 
 /* Public Class Methods ------------------------------------------------------*/
+
+FlightStateManager::FlightStateManager(
+    FlightActionExecutor& flight_action_executor,
+    FlightPrimitives& flight_primitives,
+    MissionHandler& mission_handler,
+    MissionExecutor& mission_executor,
+    GroundStationLogger& ground_station_logger,
+    ManualControlHandler& manual_control_handler,
+    TelemetryPublisher& telemetry_publisher,
+    ManeuverRunner& maneuver_runner
+)
+    : flight_action_executor_(flight_action_executor),
+      flight_primitives_(flight_primitives),
+      mission_handler_(mission_handler),
+      mission_executor_(mission_executor),
+      ground_station_logger_(ground_station_logger),
+      manual_control_handler_(manual_control_handler),
+      telemetry_publisher_(telemetry_publisher),
+      maneuver_runner_(maneuver_runner)
+{
+}
 
 std::optional<FlightStateManager::ActionScope> FlightStateManager::try_begin_maneuver(ActiveManeuver maneuver)
 {
@@ -28,19 +57,27 @@ std::optional<FlightStateManager::ActionScope> FlightStateManager::try_begin_man
     if (maneuver == ActiveManeuver::None || this->active_maneuver_ != ActiveManeuver::None)
         return std::nullopt;
 
-    const FlightMode mode_before = this->desired_mode_;
+    this->mode_before_maneuver_       = this->desired_mode_;
+    this->active_maneuver_            = maneuver;
+    this->phase_                      = Phase::None;
+    this->want_virtual_stick_         = false; // Virtual Stick intent comes from the maneuver phase while it runs.
+    this->override_during_maneuver_   = false;
 
-    this->active_maneuver_    = maneuver;
-    this->want_virtual_stick_ = false; // Always disable Virtual Stick during autonomous maneuvers.
-
-    return ActionScope(this, maneuver, mode_before);
+    return ActionScope(this, maneuver);
 }
 
 bool FlightStateManager::request_flight_mode(FlightMode requested_mode)
 {
     std::lock_guard<std::mutex> lock(this->mutex_);
 
-    if (this->desired_mode_ == requested_mode && this->active_maneuver_ == ActiveManeuver::None)
+    // During a maneuver only the mode to restore afterwards is updated.
+    if (this->active_maneuver_ != ActiveManeuver::None)
+    {
+        this->mode_before_maneuver_ = requested_mode;
+        return true;
+    }
+
+    if (this->desired_mode_ == requested_mode)
         return false;
 
     this->desired_mode_       = requested_mode;
@@ -53,31 +90,36 @@ void FlightStateManager::on_manual_override_active()
 {
     std::lock_guard<std::mutex> lock(this->mutex_);
 
-    this->desired_mode_       = FlightMode::Hold;
-    this->want_virtual_stick_ = false;
+    this->desired_mode_         = FlightMode::Hold;
+    this->mode_before_maneuver_ = FlightMode::Hold;
+    this->want_virtual_stick_   = false;
+
+    // Tells finish_maneuver() not to restore a previous mode behind the pilot's back.
+    if (this->active_maneuver_ != ActiveManeuver::None)
+        this->override_during_maneuver_ = true;
 }
 
 FlightStateManager::FlightMode FlightStateManager::get_target_flight_mode(
-    bool is_armed, 
-    bool is_virtual_stick_enabled
+    [[maybe_unused]] bool is_armed, 
+    [[maybe_unused]] bool is_virtual_stick_enabled
 ) const
 {
     std::lock_guard<std::mutex> lock(this->mutex_);
-    bool is_executing_mission = this->flight_action_executor_.is_executing_mission();
 
-    if (is_executing_mission)
-        return FlightMode::Mission;
+    switch (this->active_maneuver_)
+    {
+        case ActiveManeuver::Takeoff:        return FlightMode::Takeoff;
+        case ActiveManeuver::Land:           return FlightMode::Land;
+        case ActiveManeuver::ReturnToLaunch: return FlightMode::ReturnToLaunch;
+        case ActiveManeuver::Mission:        return FlightMode::Mission;
+        case ActiveManeuver::Reposition:     return this->mode_before_maneuver_; // GCS keeps seeing the previous mode.
+        case ActiveManeuver::None:           break;
+    }
 
-    if (this->active_maneuver_ == ActiveManeuver::Takeoff)
-        return FlightMode::Takeoff;
-
-    if (this->active_maneuver_ == ActiveManeuver::Land)
-        return FlightMode::Land;
-    
-    if (this->active_maneuver_ == ActiveManeuver::ReturnToLaunch)
-        return FlightMode::ReturnToLaunch;
-
-    if (this->want_virtual_stick_ || (is_virtual_stick_enabled && is_armed))
+    // Posctl is reported only when the GCS asked for it. Inferring it from the 
+    // hardware Virtual Stick state would feed back through the mode-change echo 
+    // and re-arm the Virtual Stick intent after navigation phases.
+    if (this->want_virtual_stick_)
         return FlightMode::Posctl;
 
     return this->desired_mode_;
@@ -87,10 +129,10 @@ uint8_t FlightStateManager::get_landed_state(bool is_armed) const
 {
     std::lock_guard<std::mutex> lock(this->mutex_);
 
-    if (this->active_maneuver_ == ActiveManeuver::Takeoff)
+    if (this->phase_ == Phase::Takeoff || this->active_maneuver_ == ActiveManeuver::Takeoff)
         return MavLandState::MAV_LANDED_STATE_TAKEOFF;
 
-    if (this->active_maneuver_ == ActiveManeuver::Land)
+    if (this->phase_ == Phase::Landing || this->active_maneuver_ == ActiveManeuver::Land)
         return MavLandState::MAV_LANDED_STATE_LANDING;
 
     if (is_armed)
@@ -103,11 +145,20 @@ bool FlightStateManager::should_virtual_stick_be_enabled(bool is_armed) const
 {
     std::lock_guard<std::mutex> lock(this->mutex_);
 
-    bool is_executing_mission = this->flight_action_executor_.is_executing_mission();
+    if (!is_armed)
+        return false;
 
-    return (this->want_virtual_stick_ || is_executing_mission) && 
-           is_armed && 
-           (this->active_maneuver_ == ActiveManeuver::None);
+    if (this->active_maneuver_ == ActiveManeuver::None)
+        return this->want_virtual_stick_;
+
+    // Navigation endpoints run on top of the Virtual Stick; native takeoff, land and RTL do not.
+    return this->phase_ == Phase::Navigating;
+}
+
+bool FlightStateManager::is_manual_input_allowed() const
+{
+    std::lock_guard<std::mutex> lock(this->mutex_);
+    return this->active_maneuver_ == ActiveManeuver::None;
 }
 
 FlightStateManager::ActiveManeuver FlightStateManager::get_active_maneuver() const
@@ -119,16 +170,48 @@ FlightStateManager::ActiveManeuver FlightStateManager::get_active_maneuver() con
 
 /* Private Class Methods -----------------------------------------------------*/
 
-void FlightStateManager::finish_maneuver(ActiveManeuver maneuver, FlightMode mode_before, bool succeeded)
+void FlightStateManager::finish_maneuver(ActiveManeuver maneuver, [[maybe_unused]] bool succeeded)
 {
     std::lock_guard<std::mutex> lock(this->mutex_);
 
     if (this->active_maneuver_ != maneuver)
         return;
 
-    this->active_maneuver_ = ActiveManeuver::None;
+    const bool overridden = std::exchange(this->override_during_maneuver_, false);
 
-    // Drone MUST engage Hold mode when autonomous actions completes.
-    this->desired_mode_       = FlightMode::Hold;
-    this->want_virtual_stick_ = false;
+    this->active_maneuver_ = ActiveManeuver::None;
+    this->phase_           = Phase::None;
+
+    // Reposition gives the previous mode back; every other maneuver ends in Hold.
+    if (maneuver == ActiveManeuver::Reposition && !overridden)
+    {
+        this->desired_mode_       = this->mode_before_maneuver_;
+        this->want_virtual_stick_ = (this->desired_mode_ == FlightMode::Posctl);
+    }
+    else
+    {
+        this->desired_mode_       = FlightMode::Hold;
+        this->want_virtual_stick_ = false;
+    }
+}
+
+void FlightStateManager::set_maneuver_phase(ActiveManeuver maneuver, Phase phase)
+{
+    std::lock_guard<std::mutex> lock(this->mutex_);
+
+    if (this->active_maneuver_ == maneuver)
+        this->phase_ = phase;
+}
+
+bool FlightStateManager::transition_maneuver(ActiveManeuver from, ActiveManeuver to)
+{
+    std::lock_guard<std::mutex> lock(this->mutex_);
+
+    if (this->active_maneuver_ != from || to == ActiveManeuver::None)
+        return false;
+
+    this->active_maneuver_ = to;
+    this->phase_           = Phase::None;
+
+    return true;
 }

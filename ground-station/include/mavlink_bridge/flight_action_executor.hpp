@@ -1,12 +1,12 @@
 /**
  ******************************************************************************
  * @file    flight_action_executor.hpp
- * @brief   Executes autonomous flight maneuvers (Arm, Takeoff, Land, Reposition).
+ * @brief   Entry points for flight commands requested by the Ground Station.
  *
- * This file defines the FlightActionExecutor class, which manages the 
- * asynchronous execution of discrete flight commands requested by the Ground 
- * Control Station. It uses cooperative std::jthread workers and RAII state 
- * scopes to safely coordinate DJI HTTP requests and MAVLink COMMAND_ACK feedback.
+ * This file defines the FlightActionExecutor class. Each command validates its 
+ * preconditions, sends the COMMAND_ACK feedback and hands a body to the 
+ * ManeuverRunner, which owns the worker thread and the state scope. The wait 
+ * loops live in FlightPrimitives and the mission lives in MissionExecutor.
  *
  * @author  Thiago Marques de Oliveira
  * @date    October, 2026
@@ -18,31 +18,29 @@
 
 /* Includes ------------------------------------------------------------------*/
 
-#include <thread>
-#include <vector>
-#include <mutex>
 #include <cstdint>
 
-// MAVSDK
+// DJI
+#include "dji_interface/dji_interface.hpp"
+
+// MAVSDK API
 #include <mavsdk/plugins/action_server/action_server.hpp>
 #include <mavsdk/plugins/mavlink_direct_server/mavlink_direct_server.hpp>
-#include <mavsdk/plugins/mission_raw_server/mission_raw_server.hpp>
 
-#include "dji_interface/dji_interface.hpp"
-#include "mavlink_bridge/flight_state_manager.hpp"
-#include "mavlink_bridge/ground_station_logger.hpp"
-#include "mavlink_bridge/mission_handler.hpp"
+// Composed modules
+#include "mavlink_bridge/module_fwd.hpp"
 
 
 /* Classes  ------------------------------------------------------------------*/
 
 /**
- * @brief Asynchronous executor for discrete flight commands and maneuvers.
+ * @brief Command front-end for discrete flight maneuvers.
  * 
- * The FlightActionExecutor handles Arm/Disarm validation and spawns managed 
- * background threads for long-running maneuvers such as Takeoff and Land. 
- * Upon destruction, all active maneuver threads are cooperatively stopped 
- * and joined to prevent dangling references.
+ * Land and return to launch preempt any running maneuver (including a mission). 
+ * Takeoff and reposition are refused while another maneuver is running.
+ * 
+ * Module references are stored for future extensions and must not be used 
+ * during construction or destruction.
  */
 class FlightActionExecutor 
 {
@@ -50,23 +48,36 @@ public:
 
     /**
      * @brief Constructor for FlightActionExecutor.
-     * @param dji                   Reference to the DJI hardware interface.
-     * @param state_manager         Reference to the flight state manager (composed module).
-     * @param mavlink_direct_server Reference to the MAVSDK direct message plugin (mavsdk server).
-     * @param ground_station_logger Reference to the ground station logger (composed module).
-     * @param mission_handler       Reference to the mission handler (composed module).
+     * @param dji                    Reference to the DJI hardware interface.
+     * @param mavlink_direct_server  Reference to the MAVSDK direct message plugin (mavsdk server).
+     * 
+     * @param state_manager          Reference to the flight state manager (composed module).
+     * @param flight_primitives      Reference to the flight primitives (composed module).
+     * @param mission_handler        Reference to the mission handler (composed module).
+     * @param mission_executor       Reference to the mission executor (composed module).
+     * @param ground_station_logger  Reference to the ground station logger (composed module).
+     * @param manual_control_handler Reference to the manual control handler (composed module).
+     * @param telemetry_publisher    Reference to the telemetry publisher (composed module).
+     * @param maneuver_runner        Reference to the maneuver runner (composed module).
      */
     FlightActionExecutor(
+        // DJI API
         DJIInterface& dji,
-        FlightStateManager& state_manager,
+        // MAVSDK API
         mavsdk::MavlinkDirectServer& mavlink_direct_server,
-        mavsdk::ActionServer& action_server,
-        GroundStationLogger& ground_station_logger,
-        MissionHandler& mission_handler
+        // Composed modules
+        FlightStateManager&   state_manager,
+        FlightPrimitives&     flight_primitives,
+        MissionHandler&       mission_handler,
+        MissionExecutor&      mission_executor,
+        GroundStationLogger&  ground_station_logger,
+        ManualControlHandler& manual_control_handler,
+        TelemetryPublisher&   telemetry_publisher,
+        ManeuverRunner&       maneuver_runner
     );
 
-    /// @brief Destructor for FlightActionExecutor. Requests stop and joins worker threads.
-    ~FlightActionExecutor();
+    /// @brief Destructor for FlightActionExecutor.
+    ~FlightActionExecutor() = default;
 
     /**
      * @brief Handles incoming Arm/Disarm commands from the Ground Station.
@@ -77,41 +88,23 @@ public:
     /// @brief Initiates the asynchronous takeoff sequence and dispatches COMMAND_ACKs.
     void execute_takeoff();
 
-    /// @brief Initiates the asynchronous landing sequence and monitors touchdown.
+    /// @brief Initiates the asynchronous landing sequence, preempting any running maneuver.
     void execute_land();
 
-    /// @brief Initiates the asynchronous returning sequence and monitors touchdown.
+    /// @brief Initiates the asynchronous returning sequence, preempting any running maneuver.
     void execute_return_to_launch();
 
     /**
-     * @brief Initiates the asynchronous change altitude sequence and monitors touchdown..
-     * @param target_altitude_amsl The altitude to be increased in meters.
+     * @brief Initiates the asynchronous change altitude sequence (MAV_CMD_DO_REPOSITION).
+     * @param target_altitude_amsl Target altitude in meters AMSL.
      */
-    void execute_change_altitude(const float& target_altitude_amsl);
+    void execute_change_altitude(float target_altitude_amsl);
 
     /**
-     * @brief Initiates the asynchronous navigation to waypoint sequence.
-     * @param coord Position3D object to store lat, lon and alt.
+     * @brief Initiates the asynchronous navigation to waypoint sequence (MAV_CMD_DO_REPOSITION with coordinates).
+     * @param waypoint Target latitude and longitude in degrees, and altitude in meters relative to home.
      */
     void execute_navigate_to_waypoint(const Location3D& waypoint);
-
-    /// @brief Initiates the asynchronous mission sequence.
-    void execute_mission();
-
-    /**
-     * @brief Save new mission plan coming from ground station.
-     * @param plan Vector of MissionItem's.
-     */
-    inline void save_new_mission_plan(const mavsdk::MissionRawServer::MissionPlan& plan)
-    {
-        std::lock_guard<std::mutex> lock(this->mission_mutex_);
-        this->latest_mission_plan_ = plan;
-    }
-
-    inline bool is_executing_mission() const 
-    {
-        return this->is_on_mission;
-    }
 
 private:
 
@@ -119,46 +112,23 @@ private:
     // CORE REFERENCES
     // --------------------------
 
-    // DJI Interface
-    DJIInterface& dji_; ///< DJI interface for command dispatch and status polling.
-    
-    // MAVSDK
-    mavsdk::MavlinkDirectServer& mavlink_direct_server_; ///< MAVSDK direct server for sending custom COMMAND_ACKs.
-    mavsdk::ActionServer&        action_server_;         ///< MAVSDK action server.
+    DJIInterface&                dji_;                   ///< DJI interface for telemetry polling and command dispatch.
+    mavsdk::MavlinkDirectServer& mavlink_direct_server_; ///< MAVSDK direct server for dispatching custom messages.
+
 
     // --------------------------
     // COMPOSED MODULES
     // --------------------------
-    
-    FlightStateManager&  state_manager_;   ///< State manager for acquiring ActionScope locks.
-    GroundStationLogger& gs_logger_;       ///< MAVSDK direct server for sending custom COMMAND_ACKs.
-    MissionHandler&      mission_handler_; ///< Mission Handler; 
 
-    // --------------------------
-    // WORKER THREADS
-    // --------------------------
+    FlightStateManager&   state_manager_;          ///< Thread-safe state machine for flight modes and maneuvers.
+    FlightPrimitives&     flight_primitives_;      ///< Blocking and cancellable flight operations.
+    MissionHandler&       mission_handler_;        ///< Mission plan storage and progress reporter.
+    MissionExecutor&      mission_executor_;       ///< Mission interpreter with pause and resume.
+    GroundStationLogger&  ground_station_logger_;  ///< Logger utility for dispatching STATUSTEXT messages and alerts to the GCS.
+    ManualControlHandler& manual_control_handler_; ///< Handler for DJI Virtual Stick and MANUAL_CONTROL inputs.
+    TelemetryPublisher&   telemetry_publisher_;    ///< Telemetry and heartbeat publisher module.
+    ManeuverRunner&       maneuver_runner_;        ///< Owner of the single maneuver thread.
 
-    std::jthread takeoff_worker_;              ///< Cooperative worker thread for takeoff execution.
-    std::jthread land_worker_;                 ///< Cooperative worker thread for landing execution.
-    std::jthread rtl_worker_;                  ///< Cooperative worker thread for return to launch execution.
-    std::jthread change_altitude_worker_;      ///< Cooperative worker thread for change altitude execution.
-    std::jthread navigate_to_waypoint_worker_; ///< Cooperative worker thread fornavigate to waypoint execution.
-    std::jthread mission_worker_;              ///< Cooperative worker thread for mission execution.
-
-    // --------------------------
-    // FLAGS
-    // --------------------------
-
-    std::atomic<bool> is_changing_altitude_{false}; 
-    std::atomic<bool> is_navigating_to_waypoint_{false}; 
-    std::atomic<bool> is_on_mission{false};
-
-    // --------------------------
-    // BUFFERS
-    // --------------------------
-
-    mavsdk::MissionRawServer::MissionPlan latest_mission_plan_;
-    mutable std::mutex mission_mutex_;
 
     // --------------------------
     // PRIVATE METHODS
@@ -170,10 +140,4 @@ private:
      * @param result  The MAV_RESULT status code.
      */
     void send_command_ack(uint16_t command, uint8_t result);
-
-    inline mavsdk::MissionRawServer::MissionPlan get_latest_mission_plan() const
-    {
-        std::lock_guard<std::mutex> lock(this->mission_mutex_);
-        return this->latest_mission_plan_;
-    }
 };

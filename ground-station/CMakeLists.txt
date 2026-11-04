@@ -78,12 +78,16 @@ target_link_libraries(dji_interface PUBLIC core_settings)
 # ----- mavlink_bridge -----
 add_library(mavlink_bridge STATIC
     src/mavlink_bridge/mavlink_bridge.cpp
+    src/mavlink_bridge/flight_primitives.cpp
     src/mavlink_bridge/flight_state_manager.cpp
     src/mavlink_bridge/flight_action_executor.cpp
     src/mavlink_bridge/telemetry_publisher.cpp
     src/mavlink_bridge/manual_control_handler.cpp
     src/mavlink_bridge/mission_handler.cpp
+    src/mavlink_bridge/mission_executor.cpp
+    src/mavlink_bridge/maneuver_runner.cpp
     src/mavlink_bridge/ground_station_logger.cpp
+    src/mavlink_bridge/utils/mission_item_utils.cpp
 )
 target_include_directories(mavlink_bridge PUBLIC include/mavlink_bridge)
 target_link_libraries(mavlink_bridge 
