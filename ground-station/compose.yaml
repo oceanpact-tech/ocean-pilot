@@ -1,6 +1,6 @@
 services:
   ocean-pilot-gs:
-    image: oceanpilot/development:base-ubuntu26
+    image: thiagomlv/ocean-pilot-gs:latest
     container_name: ocean-pilot-gs
     privileged: true 
     network_mode: host
