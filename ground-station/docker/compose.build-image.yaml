@@ -1,0 +1,6 @@
+services:
+  ocean-pilot-env:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: oceanpilot/development:base-ubuntu26
