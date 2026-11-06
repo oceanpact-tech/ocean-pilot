@@ -41,20 +41,6 @@ namespace MavCmd
     constexpr uint32_t MAV_CMD_DO_FOLLOW            = 32;
     constexpr uint32_t MAV_CMD_DO_FOLLOW_REPOSITION = 33;
     constexpr uint32_t MAV_CMD_NAV_DELAY            = 93;
-    // constexpr uint32_t
-    // constexpr uint32_t
-    // constexpr uint32_t
-    // constexpr uint32_t
-    // constexpr uint32_t
-    // constexpr uint32_t
-    // constexpr uint32_t
-    // constexpr uint32_t
-    // constexpr uint32_t
-    // constexpr uint32_t
-    // constexpr uint32_t
-    // constexpr uint32_t
-    // constexpr uint32_t
-    // constexpr uint32_t
     constexpr uint32_t MAV_CMD_MISSION_START        = 300; ///< Command to start (or resume) the mission.
     constexpr uint32_t MAV_CMD_COMPONENT_ARM_DISARM = 400; ///< Command to arm or disarm the vehicle.
     constexpr uint32_t MAV_CMD_DO_REPOSITION        = 192; ///< Command to reposition the vehicle (change altitude/location).

@@ -24,6 +24,7 @@
 // Mavlink types
 #include "mavlink_bridge/custom_types/mav_cmd.hpp"
 #include "mavlink_bridge/custom_types/mav_result.hpp"
+#include "mavlink_bridge/custom_types/px4_flight_modes.hpp"
 
 // Helpers
 #include "mavlink_bridge/utils/mavlink_json_utils.hpp"
@@ -154,7 +155,7 @@ bool MavlinkBridge::start()
     this->action_server_.set_allow_takeoff(false); // todo: testar efeito do bool
     this->action_server_.set_armable(true, true);    
     this->action_server_.set_disarmable(true, true);  
-    //this->action_server_.set_flight_mode(FlightMode::Hold);
+    this->action_server_.set_flight_mode(FlightMode::Hold);
 
     // Load parameters
     this->load_params(oceanpilot::Params::int_params);
@@ -278,17 +279,33 @@ bool MavlinkBridge::on_outgoing_message(MavlinkMessage msg)
 
     if (msg.message_name == "HEARTBEAT")
     {
+        auto autopilot_str = extract_json_value(msg.fields_json, "autopilot");
         auto custom_mode_str = extract_json_value(msg.fields_json, "custom_mode");
         
-        // Destrói o heartbeat fantasma do MAVSDK (que envia custom_mode 0)
-        if (custom_mode_str && custom_mode_str.value() == "0") {
+        if (!autopilot_str || !custom_mode_str) return false;
+        if (autopilot_str.value() != "12") return false;
+
+        try {
+            uint32_t custom_mode = std::stoul(custom_mode_str.value());
+            
+            bool is_my_custom_mode = (
+                custom_mode == PX4FlightModes::PX4_CUSTOM_MODE_POSCTL           || // Position
+                custom_mode == PX4FlightModes::PX4_CUSTOM_MODE_HOLD             || // Hold
+                custom_mode == PX4FlightModes::PX4_CUSTOM_MODE_MISSION          || // Mission
+                custom_mode == PX4FlightModes::PX4_CUSTOM_MODE_RETURN_TO_LAUNCH || // RTL
+                custom_mode == PX4FlightModes::PX4_CUSTOM_MODE_LAND                // Land
+            );
+
+            if (!is_my_custom_mode) {
+                return false;
+            }
+        } catch (...) {
             return false; 
         }
         
-        // Deixa o seu Heartbeat customizado passar
         return true;
     }
-
+    
     return true; // Allow any other message
 }
 

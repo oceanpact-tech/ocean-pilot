@@ -7,29 +7,11 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 # Set output directory for binaries
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/build/bin")
 
-# ----- Boost setup -----
-set(Boost_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/third_party/boost")
-set(Boost_NO_SYSTEM_PATHS ON)
-
-# Set RPATH for runtime library search path
-set(CMAKE_BUILD_RPATH "${Boost_ROOT}/stage/lib")
-
-# ----- MAVSDK setup -----
-set(MAVSDK_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/third_party/MAVSDK/cpp/")
-set(MAVSDK_NO_SYSTEM_PATHS ON)
-
-# cmake config 
-list(PREPEND CMAKE_PREFIX_PATH 
-    "${Boost_ROOT}/stage/lib/cmake"
-    "${Boost_ROOT}"
-    "${MAVSDK_ROOT}/build/install"
-)
-
 # ---------------------- 
 # Dependencies
 # ---------------------- 
 
-find_package(Boost REQUIRED CONFIG COMPONENTS system json) # Make sure to use its own cmake config files
+find_package(Boost REQUIRED COMPONENTS system json)
 find_package(OpenSSL REQUIRED)
 find_package(MAVSDK REQUIRED)
 find_package(Threads REQUIRED)
@@ -102,8 +84,5 @@ target_link_libraries(mavlink_bridge
 # Executables
 # ---------------------- 
 
-# add_executable(${PROJECT_NAME}_test_telemetry test/dji_interface/test_telemetry.cpp)
-# target_link_libraries(${PROJECT_NAME}_test_telemetry PRIVATE dji_interface)
-
-add_executable(mavlink_bridge_test_telemetry test/mavlink_bridge/main.cpp)
-target_link_libraries(mavlink_bridge_test_telemetry PRIVATE mavlink_bridge)
+add_executable(main src/main.cpp)
+target_link_libraries(main PRIVATE mavlink_bridge)

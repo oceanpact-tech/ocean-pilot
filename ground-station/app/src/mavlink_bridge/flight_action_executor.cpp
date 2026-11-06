@@ -107,16 +107,25 @@ void FlightActionExecutor::handle_arm_disarm(const mavsdk::ActionServer::ArmDisa
     {
         if (!this->dji_.is_ready_to_takeoff())
         {
-            this->send_command_ack(MavCmd::MAV_CMD_COMPONENT_ARM_DISARM, MavResult::DENIED);
+            this->send_command_ack(
+                MavCmd::MAV_CMD_COMPONENT_ARM_DISARM, 
+                MavResult::DENIED
+            );
             return;
         }
 
-        this->send_command_ack(MavCmd::MAV_CMD_COMPONENT_ARM_DISARM, MavResult::ACCEPTED);
+        this->send_command_ack(
+            MavCmd::MAV_CMD_COMPONENT_ARM_DISARM, 
+            MavResult::ACCEPTED
+        );
         return;
     }
 
     // Command = DISARM. The DJI SDK cannot disarm, so answer instead of letting the GCS time out.
-    this->send_command_ack(MavCmd::MAV_CMD_COMPONENT_ARM_DISARM, MavResult::DENIED);
+    this->send_command_ack(
+        MavCmd::MAV_CMD_COMPONENT_ARM_DISARM, 
+        MavResult::DENIED
+    );
 }
 
 void FlightActionExecutor::execute_takeoff()

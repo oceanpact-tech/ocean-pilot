@@ -19,8 +19,13 @@
 
 #include <string>
 
-#include "mavlink_bridge/custom_types/mav_land_state.hpp"
+// Composed modules
 #include "mavlink_bridge/flight_state_manager.hpp"
+
+// Mavlink types
+#include "mavlink_bridge/custom_types/mav_land_state.hpp"
+#include "mavlink_bridge/custom_types/mav_mode.hpp"
+#include "mavlink_bridge/custom_types/px4_flight_modes.hpp"
 
 
 /* Aliases -------------------------------------------------------------------*/
@@ -143,50 +148,33 @@ void TelemetryPublisher::publish_telemetry()
     );
 }
 
-// void TelemetryPublisher::publish_heartbeat()
-// {
-//     const bool is_armed = this->dji_.is_armed();
-//     const bool is_vstick_on = this->dji_.is_virtual_stick_enabled();
-//     const FlightMode target_mode = this->state_manager_.get_target_flight_mode(is_armed, is_vstick_on);
-
-//     // Update arming state
-//     this->action_server_.set_armed_state(is_armed);
-
-//     // Update flight mode if changed or explicitly invalidated
-//     const bool force_republish = this->force_mode_republish_.exchange(false);
-//     if (force_republish || this->last_published_mode_ != target_mode)
-//     {
-//         this->last_published_mode_ = target_mode;
-//         this->action_server_.set_flight_mode(target_mode);
-//     }
-// }
-
 void TelemetryPublisher::publish_heartbeat()
 {
     const bool is_armed = this->dji_.is_armed();
     const bool is_vstick_on = this->dji_.is_virtual_stick_enabled();
     const FlightMode target_mode = this->state_manager_.get_target_flight_mode(is_armed, is_vstick_on);
 
-    // Mapeamento dos modos para o padrão numérico da PX4
+    // Allowed flight modes
     uint32_t px4_custom_mode = 0; 
     switch (target_mode)
     {
-        case FlightMode::Posctl:         px4_custom_mode = 196608;    break; // Position
-        case FlightMode::Hold:           px4_custom_mode = 50593792;  break; // Hold
-        case FlightMode::Mission:        px4_custom_mode = 67371008;  break; // Mission
-        case FlightMode::ReturnToLaunch: px4_custom_mode = 84148224;  break; // RTL
-        case FlightMode::Land:           px4_custom_mode = 100925440; break; // Land
-        default:                         px4_custom_mode = 0;         break; // Unknown
+        case FlightMode::Posctl:         px4_custom_mode = PX4FlightModes::PX4_CUSTOM_MODE_POSCTL;           break; // Position
+        case FlightMode::Hold:           px4_custom_mode = PX4FlightModes::PX4_CUSTOM_MODE_HOLD;             break; // Hold
+        case FlightMode::Mission:        px4_custom_mode = PX4FlightModes::PX4_CUSTOM_MODE_MISSION;          break; // Mission
+        case FlightMode::ReturnToLaunch: px4_custom_mode = PX4FlightModes::PX4_CUSTOM_MODE_RETURN_TO_LAUNCH; break; // RTL
+        case FlightMode::Land:           px4_custom_mode = PX4FlightModes::PX4_CUSTOM_MODE_LAND;             break; // Land
+        default:                         px4_custom_mode = PX4FlightModes::PX4_CUSTOM_MODE_HOLD;             break; // Hold
     }
 
-    // 1 = MAV_MODE_FLAG_CUSTOM_MODE_ENABLED | 128 = MAV_MODE_FLAG_SAFETY_ARMED
-    uint8_t base_mode = 1; 
+    uint8_t base_mode = MavMode::MAV_MODE_FLAG_CUSTOM_MODE_ENABLED; 
     if (is_armed) {
-        base_mode |= 128;
+        base_mode |= MavMode::MAV_MODE_FLAG_SAFETY_ARMED;
     }
 
-    // 2 = Quadrotor | 12 = PX4 | 4 = ACTIVE / 3 = STANDBY
-    uint8_t system_status = is_armed ? 4 : 3;
+    constexpr int STANDBY = 3;
+    constexpr int ACTIVE  = 4;
+
+    uint8_t system_status = is_armed ? ACTIVE : STANDBY;
 
     mavsdk::MavlinkDirectServer::MavlinkMessage msg;
     msg.message_name = "HEARTBEAT";
@@ -199,6 +187,16 @@ void TelemetryPublisher::publish_heartbeat()
         "mavlink_version": 3
     })";
 
+    // Update inner MAVSDK state machine
+    this->action_server_.set_armed_state(is_armed);
+    const bool force_republish = this->force_mode_republish_.exchange(false);
+    if (force_republish || this->last_published_mode_ != target_mode)
+    {
+        this->last_published_mode_ = target_mode;
+        this->action_server_.set_flight_mode(target_mode);
+    }
+
+    // Request to hearbeat
     this->mavlink_direct_server_.send_message(msg);
 }
 

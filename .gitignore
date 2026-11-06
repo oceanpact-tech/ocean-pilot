@@ -1,7 +1,5 @@
 .vscode/
 
-ground-station/docker/
+ground-station/test/
 ground-station/build/
-ground-station/test/python
-ground-station/z-ignored
-
+ground-station/third_party/

@@ -143,6 +143,7 @@ private:
         config.set_mav_type(mavsdk::MavType::Quadrotor);
         config.set_autopilot(mavsdk::Autopilot::Px4);
         config.set_compatibility_mode(mavsdk::CompatibilityMode::Px4);
+        config.set_always_send_heartbeats(false);
 
         // Getters
         MavlinkBridge::system_id_    = config.get_system_id();
