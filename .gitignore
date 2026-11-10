@@ -1,5 +1,6 @@
 .vscode/
 
+ground-station/docker/video_test/logs
 ground-station/test/
 ground-station/app/build/
 ground-station/third_party/

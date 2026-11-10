@@ -3,80 +3,151 @@
  * @file    drone_discovery.cpp
  * @brief   Implementation of the UDP broadcast drone discovery.
  *
+ * The discovery message is sent to the broadcast address of every active IPv4 
+ * interface (and to the limited broadcast address) once per second until a 
+ * Lyrebird reply arrives or the timeout expires. Replies are received on a 
+ * fixed local port, so a firewall rule can allow them.
+ *
  * @author  Thiago Marques de Oliveira
  * @date    October, 2026
  ******************************************************************************
  */
 
 #include "dji_interface/transport/drone_discovery.hpp"
+
+#include <arpa/inet.h>
+#include <ifaddrs.h>
+#include <net/if.h>
+
+#include <chrono>
+#include <functional>
 #include <iostream>
 #include <vector>
 
-std::optional<std::string> DroneDiscovery::discover_drone(net::io_context& ioc, int timeout_seconds)
+
+namespace
 {
-    try {
-        udp::socket socket(ioc);
-        socket.open(udp::v4());
-        
-        // Habilita a flag de broadcast no socket
-        socket.set_option(boost::asio::socket_base::broadcast(true));
+    constexpr unsigned short DISCOVERY_PORT = 30000;                 ///< Port the Lyrebird app listens on.
+    constexpr unsigned short REPLY_PORT     = 30001;                 ///< Fixed local port for replies (allow it in the firewall).
+    constexpr const char*    DISCOVERY_MSG  = "DISCOVER_WILDBRIDGE"; ///< Discovery request payload.
+    constexpr const char*    REPLY_PREFIX   = "WILDBRIDGE_HERE:";    ///< Prefix of a valid reply.
 
-        // Envia o payload de descoberta para a porta 30000 no IP de broadcast universal
-        udp::endpoint broadcast_endpoint(boost::asio::ip::address_v4::broadcast(), 30000);
-        std::string payload = "DISCOVER_LYREBIRD";
-        socket.send_to(boost::asio::buffer(payload), broadcast_endpoint);
+    /// @brief Collects the broadcast address of every active, non-loopback IPv4 interface.
+    std::vector<boost::asio::ip::address_v4> collect_broadcast_addresses()
+    {
+        std::vector<boost::asio::ip::address_v4> addresses;
 
-        std::cout << "[DroneDiscovery] Broadcasting discovery message on port 30000...\n";
+        ifaddrs* interfaces = nullptr;
+        if (getifaddrs(&interfaces) != 0)
+            return addresses;
 
-        // Prepara para receber a resposta
-        std::vector<char> recv_buffer(1024);
-        udp::endpoint sender_endpoint;
-        
-        // Aguarda a resposta com timeout bloqueante usando asio::steady_timer e run_one()
-        // Uma abordagem mais limpa do que callbacks aninhados para fluxos de boot síncronos
-        bool timeout = false;
-        boost::asio::steady_timer timer(ioc, std::chrono::seconds(timeout_seconds));
-        timer.async_wait([&](const boost::system::error_code& error) {
-            if (!error) {
-                timeout = true;
-                socket.cancel(); // Cancela operações pendentes no socket (o receive)
-            }
-        });
+        for (ifaddrs* ifa = interfaces; ifa != nullptr; ifa = ifa->ifa_next)
+        {
+            if (ifa->ifa_addr == nullptr || ifa->ifa_addr->sa_family != AF_INET)
+                continue;
 
-        bool got_reply = false;
-        std::string response_str;
-        socket.async_receive_from(
-            boost::asio::buffer(recv_buffer), sender_endpoint,
-            [&](const boost::system::error_code& error, std::size_t bytes_recvd) {
-                if (!error && !timeout) {
-                    response_str.assign(recv_buffer.data(), bytes_recvd);
-                    got_reply = true;
-                    timer.cancel(); // Cancela o timer se a mensagem chegou primeiro
-                }
-            });
+            const unsigned int flags = ifa->ifa_flags;
+            if (!(flags & IFF_UP) || !(flags & IFF_BROADCAST) || (flags & IFF_LOOPBACK))
+                continue;
 
-        // Roda o loop do io_context até que uma das operações (timer ou receive) termine
-        ioc.restart();
-        while (ioc.run_one()) {
-            if (got_reply || timeout) break;
+            if (ifa->ifa_broadaddr == nullptr)
+                continue;
+
+            const auto* broadcast = reinterpret_cast<const sockaddr_in*>(ifa->ifa_broadaddr);
+            addresses.emplace_back(ntohl(broadcast->sin_addr.s_addr));
         }
 
-        if (timeout) {
-            std::cerr << "[DroneDiscovery] Timeout. Nenhum drone encontrado na rede local.\n";
+        freeifaddrs(interfaces);
+        return addresses;
+    }
+}
+
+
+std::optional<std::string> DroneDiscovery::discover_drone(net::io_context& ioc, int timeout_seconds)
+{
+    try 
+    {
+        udp::socket socket(ioc);
+        socket.open(udp::v4());
+        socket.set_option(boost::asio::socket_base::reuse_address(true));
+        socket.set_option(boost::asio::socket_base::broadcast(true));
+
+        boost::system::error_code bind_error;
+        socket.bind(udp::endpoint(udp::v4(), REPLY_PORT), bind_error);
+        if (bind_error)
+            std::cerr << "[DroneDiscovery] Port " << REPLY_PORT << " unavailable, using ephemeral port.\n";
+
+        // Destinations: broadcast of every interface + limited broadcast.
+        std::vector<udp::endpoint> destinations;
+        for (const auto& address : collect_broadcast_addresses())
+            destinations.emplace_back(address, DISCOVERY_PORT);
+        destinations.emplace_back(boost::asio::ip::address_v4::broadcast(), DISCOVERY_PORT);
+
+        std::cout << "[DroneDiscovery] Broadcasting on port " << DISCOVERY_PORT << " to:";
+        for (const auto& destination : destinations)
+            std::cout << ' ' << destination.address().to_string();
+        std::cout << '\n';
+
+        // Receive loop: re-armed until a valid reply arrives.
+        std::vector<char>          buffer(1024);
+        udp::endpoint              sender;
+        std::optional<std::string> drone_ip;
+
+        std::function<void()> arm_receive = [&]() 
+        {
+            socket.async_receive_from(
+                net::buffer(buffer), sender,
+                [&](const boost::system::error_code& error, std::size_t bytes_received) 
+                {
+                    if (error)
+                        return; // Closed or cancelled.
+
+                    const std::string reply(buffer.data(), bytes_received);
+                    if (reply.rfind(REPLY_PREFIX, 0) == 0) 
+                    {
+                        // The sender address is the one reachable from this machine.
+                        drone_ip = sender.address().to_string();
+                        return;
+                    }
+
+                    arm_receive(); // Someone else answered on this port: keep listening.
+                });
+        };
+        arm_receive();
+
+        const std::string payload(DISCOVERY_MSG);
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(timeout_seconds);
+
+        while (!drone_ip && std::chrono::steady_clock::now() < deadline)
+        {
+            for (const auto& destination : destinations)
+            {
+                boost::system::error_code send_error;
+                socket.send_to(net::buffer(payload), destination, 0, send_error);
+            }
+
+            // Wait up to 1 s for a reply, then send the request again.
+            ioc.restart();
+            ioc.run_one_for(std::chrono::seconds(1));
+        }
+
+        // Drain the pending receive handler while the locals it references are still alive.
+        socket.close();
+        ioc.restart();
+        ioc.poll();
+
+        if (!drone_ip)
+        {
+            std::cerr << "[DroneDiscovery] Timeout. No drone found. "
+                         "(udp " << REPLY_PORT << ").\n";
             return std::nullopt;
         }
 
-        if (got_reply) {
-            // O protocolo responde no formato "LYREBIRD_HERE:<ip>:<name>"
-            if (response_str.find("LYREBIRD_HERE:") == 0) {
-                // Se o IP não foi preenchido no pacote, usamos o IP real do remetente (fallback)
-                std::string drone_ip = sender_endpoint.address().to_string();
-                std::cout << "[DroneDiscovery] Found Lyrebird drone at " << drone_ip << "\n";
-                return drone_ip;
-            }
-        }
+        std::cout << "[DroneDiscovery] Found WildBridge drone at " << *drone_ip << "\n";
+        return drone_ip;
     } 
-    catch (std::exception& e) {
+    catch (std::exception& e) 
+    {
         std::cerr << "[DroneDiscovery] Discovery error: " << e.what() << "\n";
     }
 
