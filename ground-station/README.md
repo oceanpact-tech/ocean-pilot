@@ -1,3 +1,4 @@
+OceanPilot
 
 ## Create container
 
@@ -17,3 +18,14 @@ docker exec -it ocean-pilot-gs bash
 docker compose -f docker/compose.build-image.yaml build --no-cache
 ```
 
+## Run MTX for video
+
+```bash
+docker compose -f compose.video-test.yaml up -d
+```
+
+## Run program
+
+```bash
+/root/app/build/bin/main "RC_IP"
+```

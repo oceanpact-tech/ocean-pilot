@@ -1,5 +1,5 @@
 .vscode/
 
 ground-station/test/
-ground-station/build/
+ground-station/app/build/
 ground-station/third_party/
