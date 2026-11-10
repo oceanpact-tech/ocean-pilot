@@ -1,0 +1,11 @@
+{"ts":"2026-11-09T16:05:13.626747+00:00","type":"video_grid_started","port":8090,"logFile":"/logs/video-connection-test-20261109T160513Z.ndjson","drones":"any"}
+{"ts":"2026-11-09T16:05:13.627177+00:00","type":"discovery_started","drones":"any"}
+{"ts":"2026-11-09T16:05:13.641827+00:00","type":"mediamtx_paths","paths":[]}
+{"ts":"2026-11-09T16:05:15.644909+00:00","type":"mediamtx_paths","paths":[]}
+{"ts":"2026-11-09T16:05:17.647068+00:00","type":"mediamtx_paths","paths":[]}
+{"ts":"2026-11-09T16:05:18.636338+00:00","type":"discovery_started","drones":"any"}
+{"ts":"2026-11-09T16:05:19.649977+00:00","type":"mediamtx_paths","paths":[]}
+{"ts":"2026-11-09T16:05:21.652149+00:00","type":"mediamtx_paths","paths":[]}
+{"ts":"2026-11-09T16:05:23.641976+00:00","type":"discovery_started","drones":"any"}
+{"ts":"2026-11-09T16:05:23.653986+00:00","type":"mediamtx_paths","paths":[]}
+{"ts":"2026-11-09T16:05:25.656309+00:00","type":"mediamtx_paths","paths":[]}

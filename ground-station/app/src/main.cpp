@@ -65,8 +65,8 @@ int main(int argc, char *argv[])
     };
 
     GroundStationSocketConfig ground_station_socket = {
-        .ip = "127.0.0.1",          // QGC Running locally.
-        // .ip = "192.168.88.245",    // QGC Running on another PC.
+        // .ip = "127.0.0.1",          // QGC Running locally.
+        .ip = "10.10.10.2",    // QGC Running on another PC.
         // .ip = "0.0.0.0",              // Discover QGC
         .port = "14550"
     };
