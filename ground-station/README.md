@@ -27,5 +27,5 @@ docker compose -f compose.video-test.yaml up -d
 ## Run program
 
 ```bash
-/root/app/build/bin/main "RC_IP"
+/root/app/build/bin/main
 ```
