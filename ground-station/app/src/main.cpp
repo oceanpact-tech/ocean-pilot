@@ -37,24 +37,24 @@ int main(int argc, char *argv[])
     std::string drone_ip = "0.0.0.0";
     if (argc >= 2) 
     {
-        // Se o usuário passou o IP manualmente, ignora a descoberta
+        // IP manually provided as command line argument
         drone_ip = argv[1];
         std::cout << "DRONE IP (Manual): " << drone_ip << "\n";
     } 
-    // else 
-    // {
-    //     // Tenta descobrir o drone via UDP Broadcast
-    //     auto discovered_ip = DroneDiscovery::discover_drone(ioc);
-    //     if (discovered_ip) 
-    //     {
-    //         drone_ip = *discovered_ip;
-    //     } 
-    //     else 
-    //     {
-    //         std::cerr << "[Main] Falha fatal: Drone não encontrado na rede. Encerrando.\n";
-    //         return -1;
-    //     }
-    // }
+    else 
+    {
+        // Discover the drone's IP via UDP broadcast
+        auto discovered_ip = DroneDiscovery::discover_drone(ioc);
+        if (discovered_ip) 
+        {
+            drone_ip = *discovered_ip;
+        } 
+        else 
+        {
+            std::cerr << "[Main] Fatal error: Drone not found on the network. Shutting down.\n";
+            return -1;
+        }
+    }
 
     std::cout << "DRONE IP: " <<  drone_ip << "\n";
 
@@ -65,9 +65,9 @@ int main(int argc, char *argv[])
     };
 
     GroundStationSocketConfig ground_station_socket = {
-        // .ip = "127.0.0.1",          // QGC Running locally.
-        .ip = "10.10.10.2",    // QGC Running on another PC.
-        // .ip = "0.0.0.0",              // Discover QGC
+        .ip = "127.0.0.1",          // QGC Running locally.
+        // .ip = "10.10.10.2",    // QGC Running on another PC.
+        // .ip = "0.0.0.0",       // Discover QGC
         .port = "14550"
     };
 
@@ -75,7 +75,6 @@ int main(int argc, char *argv[])
     MavlinkBridge bridge(ioc, wildbridge_socket, ground_station_socket);
     if (!bridge.start())
     {
-
         std::cerr << "[Main] Fail to start MavlinkBridge.\n";
         return -1;
     }
