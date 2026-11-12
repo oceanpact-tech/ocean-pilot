@@ -72,3 +72,26 @@ void DJICommander::go_to_waypoint_hold_heading(std::string payload, std::functio
 {
     this->http_client_.post_async(std::string(endpoints::post::GOTO_WP_HOLD_HEADING), payload, on_complete);
 }
+
+void DJICommander::set_gimbal_rel_position(float roll, float pitch, float yaw, std::function<void(bool)> on_complete) 
+{
+    std::string payload = std::to_string(roll) + "," + std::to_string(pitch) + "," + std::to_string(yaw);
+    this->http_client_.post_async(std::string(endpoints::post::SET_GIMBAL_REL_POS), payload, on_complete);
+}
+
+void DJICommander::set_gimbal_position(float roll, float pitch, float yaw, std::function<void(bool)> on_complete) 
+{
+    std::string payload = std::to_string(roll) + "," + std::to_string(pitch) + "," + std::to_string(yaw);
+    this->http_client_.post_async(std::string(endpoints::post::SET_GIMBAL_POS), payload, on_complete);
+}
+
+void DJICommander::set_gimbal_speed(float roll, float pitch, float yaw, std::function<void(bool)> on_complete) 
+{
+    std::string payload = std::to_string(roll) + "," + std::to_string(pitch) + "," + std::to_string(yaw);
+    this->http_client_.post_async(std::string(endpoints::post::SET_GIMBAL_SPEED), payload, on_complete);
+}
+
+void DJICommander::set_gimbal_stop(std::function<void(bool)> on_complete) 
+{
+    this->http_client_.post_async(std::string(endpoints::post::SET_GIMBAL_STOP), "", on_complete);
+}

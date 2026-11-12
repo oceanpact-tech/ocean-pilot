@@ -129,6 +129,39 @@ public:
      */
     void go_to_waypoint_hold_heading(std::string payload, std::function<void(bool, std::string)> on_complete = nullptr);
 
+    /**
+     * @brief Set gimbal relative position.
+     * @param on_complete Optional callback function to be executed after the request is processed.
+     * @param roll  Roll  relative position in degrees. // no matter what value is passed, roll never changes by default on android.
+     * @param pitch Pitch relative position in degrees.
+     * @param yaw   Yaw   relative position in degrees.
+     */
+    void set_gimbal_rel_position(float roll, float pitch, float yaw, std::function<void(bool)> on_complete = nullptr);
+
+    /**
+     * @brief Set gimbal absolute position.
+     * @param on_complete Optional callback function to be executed after the request is processed.
+     * @param roll  Roll  position in degrees. // no matter what value is passed, roll never changes by default on android.
+     * @param pitch Pitch position in degrees.
+     * @param yaw   Yaw   position in degrees.
+     */
+    void set_gimbal_position(float roll, float pitch, float yaw, std::function<void(bool)> on_complete = nullptr);
+
+    /**
+     * @brief Set gimbal speed.
+     * @param on_complete Optional callback function to be executed after the request is processed.
+     * @param roll  Roll  speed in degrees/second. // no matter what value is passed, roll never changes by default on android.
+     * @param pitch Pitch speed in degrees/second.
+     * @param yaw   Yaw   speed in degrees/second.
+     */
+    void set_gimbal_speed(float roll, float pitch, float yaw, std::function<void(bool)> on_complete = nullptr);
+
+    /**
+     * @brief Stop gimbal speed.
+     * @param on_complete Optional callback function to be executed after the request is processed.
+     */
+    void set_gimbal_stop(std::function<void(bool)> on_complete = nullptr);
+
 private:
 
     HttpHandler http_client_; ///< HTTP client.

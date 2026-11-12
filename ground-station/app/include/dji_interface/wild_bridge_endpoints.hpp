@@ -35,6 +35,10 @@ namespace endpoints
         // constexpr std::string_view GIMBAL_SET_YAW = "/send/gimbal/yaw";  // !!! This is the yaw joint angle !!!
         // constexpr std::string_view GIMBAL_SET_REL_PITCH = "/send/gimbal/rel_pitch";
         // constexpr std::string_view GIMBAL_SET_REL_YAW = "/send/gimbal/rel_yaw";
+        constexpr std::string_view SET_GIMBAL_REL_POS = "/send/gimbal/rel_position";
+        constexpr std::string_view SET_GIMBAL_POS = "/send/gimbal/position";
+        constexpr std::string_view SET_GIMBAL_SPEED = "/send/gimbal/speed";
+        constexpr std::string_view SET_GIMBAL_STOP = "/send/gimbal/stop";
         constexpr std::string_view TAKEOFF = "/send/takeoff";
         constexpr std::string_view LAND = "/send/land";
         constexpr std::string_view RETURN_TO_HOME = "/send/RTH";
