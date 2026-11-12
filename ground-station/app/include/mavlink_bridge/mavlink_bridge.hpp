@@ -40,6 +40,7 @@
 #include <mavsdk/plugins/mavlink_direct_server/mavlink_direct_server.hpp>
 #include <mavsdk/plugins/param_server/param_server.hpp>
 #include <mavsdk/plugins/mission_raw_server/mission_raw_server.hpp>
+#include <mavsdk/plugins/camera_server/camera_server.hpp>
 
 // Composed modules
 #include "mavlink_bridge/flight_state_manager.hpp"
@@ -51,6 +52,7 @@
 #include "mavlink_bridge/manual_control_handler.hpp"
 #include "mavlink_bridge/telemetry_publisher.hpp"
 #include "mavlink_bridge/maneuver_runner.hpp"
+#include "mavlink_bridge/actuators/gimbal_manager.hpp"
 
 // Parameter definitions
 #include "mavlink_bridge/params/px4_params.hpp"
@@ -124,18 +126,21 @@ private:
     // MAVLINK CONFIG & SERVERS
     // --------------------------
 
-    mavsdk::Mavsdk              mavsdk_;                ///< Core MAVSDK instance managing communication and plugins.
+    mavsdk::Mavsdk              autopilot_component_;   ///< Primary instance of mavsdk.
     mavsdk::TelemetryServer     telemetry_server_;      ///< MAVSDK telemetry server.
     mavsdk::ActionServer        action_server_;         ///< MAVSDK action server.
-    mavsdk::MavlinkDirectServer mavlink_direct_server_; ///< MAVSDK MAVLink direct server.
     mavsdk::ParamServer         param_server_;          ///< MAVSDK param server.
     mavsdk::MissionRawServer    mission_server_;        ///< MAVSDK mission server. 
+    mavsdk::MavlinkDirectServer mavlink_direct_server_; ///< MAVSDK MAVLink direct server for autopilot component.
+    mavsdk::MavlinkDirectServer gimbal_direct_server_;  ///< MAVSDK MAVLink direct server for the gimbal component.   
+    mavsdk::CameraServer        camera_server_;         ///< MAVSDK camera server for the gimbal component.
 
-    inline static uint32_t system_id_    = 0;
-    inline static uint8_t  component_id_ = 0;
+    inline static uint32_t system_id_ = 0;
+    inline static uint8_t  autopilot_component_id_ = 0;
+    inline static uint8_t  gimbal_component_id_    = 0;
 
-    /// @brief Creates and prepares the MAVSDK configuration.
-    inline static mavsdk::Mavsdk::Configuration create_mavsdk_config()
+    /// @brief Creates and prepares the MAVSDK configuration for autopilot.
+    inline static mavsdk::Mavsdk::Configuration create_autopilot_component_config()
     {   
         mavsdk::Mavsdk::Configuration config(mavsdk::ComponentType::Autopilot); // Configure as an Autopilot component.
         
@@ -147,7 +152,7 @@ private:
 
         // Getters
         MavlinkBridge::system_id_    = config.get_system_id();
-        MavlinkBridge::component_id_ = config.get_component_id();
+        MavlinkBridge::autopilot_component_id_ = config.get_component_id();
 
         return config;
     };
@@ -205,11 +210,12 @@ private:
     // SUBSCRIPTION HANDLES
     // --------------------------
 
-    mavsdk::Mavsdk::InterceptJsonHandle          outgoing_msg_handle_{}; ///< Handle for outgoing message filter.
-    mavsdk::Mavsdk::InterceptJsonHandle          incoming_msg_handle_{}; ///< Handle for incoming message router.
-    mavsdk::ActionServer::ArmDisarmHandle        arm_disarm_handle_{};   ///< Handle for arm/disarm command callback.
-    mavsdk::ActionServer::TakeoffHandle          takeoff_handle_{};      ///< Handle for takeoff command callback.
-    mavsdk::ActionServer::FlightModeChangeHandle flight_mode_handle_{};  ///< Handle for flight mode change callback.
+    mavsdk::Mavsdk::InterceptJsonHandle            outgoing_msg_handle_{}; ///< Handle for outgoing message filter.
+    mavsdk::Mavsdk::InterceptJsonHandle            incoming_msg_handle_{}; ///< Handle for incoming message router.
+    mavsdk::ActionServer::ArmDisarmHandle          arm_disarm_handle_{};   ///< Handle for arm/disarm command callback.
+    mavsdk::ActionServer::TakeoffHandle            takeoff_handle_{};      ///< Handle for takeoff command callback.
+    mavsdk::ActionServer::FlightModeChangeHandle   flight_mode_handle_{};  ///< Handle for flight mode change callback.
+    mavsdk::CameraServer::StorageInformationHandle storage_info_handle_{}; ///< Handle for storage information subscription.
 
     // --------------------------
     // SCHEDULING TIMER
@@ -223,6 +229,13 @@ private:
     /// @brief Send telemetry data via MAVLink at a fixed frequency.
     void schedule_telemetry();
 
+    /// Gimbal watch dog
+    std::chrono::steady_clock::time_point last_gimbal_cmd_time_{};
+    bool is_gimbal_moving_ = false;
+    static constexpr auto GIMBAL_WATCHDOG_TIMEOUT = std::chrono::milliseconds(100);
+
+    /// @brief Checks if gimbal commands have timed out to stop movement.
+    void check_gimbal_watchdog();
 
     // --------------------------
     // SUBSCRIBERS

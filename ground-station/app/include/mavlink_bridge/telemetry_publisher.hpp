@@ -52,6 +52,7 @@ public:
      * @param telemetry_server       Reference to the MAVSDK telemetry server plugin.
      * @param action_server          Reference to the MAVSDK action server plugin.
      * @param mavlink_direct_server  Reference to the MAVSDK direct message plugin (mavsdk server).
+     * @param gimbal_direct_server   Reference to the MAVSDK direct message plugin (mavsdk server) for gimbal.
      * @param state_manager          Reference to the flight state manager (composed module).
      * @param flight_action_executor Reference to the flight action executor (composed module).
      * @param flight_primitives      Reference to the flight primitives (composed module).
@@ -68,6 +69,7 @@ public:
         mavsdk::TelemetryServer& telemetry_server,
         mavsdk::ActionServer& action_server,
         mavsdk::MavlinkDirectServer& mavlink_direct_server,
+        mavsdk::MavlinkDirectServer& gimbal_direct_server,
         // Composed modules
         FlightStateManager&   state_manager,
         FlightActionExecutor& flight_action_executor,
@@ -98,6 +100,7 @@ private:
     mavsdk::TelemetryServer&     telemetry_server_;      ///< MAVSDK telemetry server.
     mavsdk::ActionServer&        action_server_;         ///< MAVSDK action server.
     mavsdk::MavlinkDirectServer& mavlink_direct_server_; ///< MAVSDK direct server for dispatching custom messages.
+    mavsdk::MavlinkDirectServer& gimbal_direct_server_;  ///< MAVSDK direct server for dispatching custom messages for gimbal.
 
 
     // --------------------------
@@ -167,4 +170,7 @@ private:
 
     /// @brief Publishes EXTENDED_SYS_STATE message with current landed state.
     void publish_extended_sys_state();
+
+
+    void publish_gimbal();
 };

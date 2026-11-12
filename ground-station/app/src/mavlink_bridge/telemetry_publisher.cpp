@@ -28,6 +28,8 @@
 #include "mavlink_bridge/custom_types/px4_flight_modes.hpp"
 
 
+#define TELEMETRY_FREQUENCY_HZ 10 // Frequency of telemetry sending in Hz
+
 /* Aliases -------------------------------------------------------------------*/
 
 using FlightMode = mavsdk::ActionServer::FlightMode;
@@ -42,6 +44,7 @@ TelemetryPublisher::TelemetryPublisher(
     mavsdk::TelemetryServer& telemetry_server,
     mavsdk::ActionServer& action_server,
     mavsdk::MavlinkDirectServer& mavlink_direct_server,
+    mavsdk::MavlinkDirectServer& gimbal_direct_server,
     // Composed modules
     FlightStateManager&   state_manager,
     FlightActionExecutor& flight_action_executor,
@@ -58,6 +61,7 @@ TelemetryPublisher::TelemetryPublisher(
       telemetry_server_(telemetry_server),
       action_server_(action_server),
       mavlink_direct_server_(mavlink_direct_server),
+      gimbal_direct_server_(gimbal_direct_server),
       // Composed modules
       state_manager_(state_manager),
       flight_action_executor_(flight_action_executor),
@@ -67,8 +71,7 @@ TelemetryPublisher::TelemetryPublisher(
       ground_station_logger_(ground_station_logger),
       manual_control_handler_(manual_control_handler),
       maneuver_runner_(maneuver_runner)
-{
-}
+{ }
 
 void TelemetryPublisher::publish_cycle()
 {
@@ -79,6 +82,8 @@ void TelemetryPublisher::publish_cycle()
     this->get_raw_telemetry();
     this->prepare_mavlink_telemetry();
     this->publish_telemetry();
+
+    this->publish_gimbal(); // TEST
 }
 
 void TelemetryPublisher::invalidate_published_mode() noexcept
@@ -245,4 +250,61 @@ void TelemetryPublisher::publish_extended_sys_state()
     })";
 
     this->mavlink_direct_server_.send_message(msg);
+}
+
+void TelemetryPublisher::publish_gimbal()
+{
+    using Msg = mavsdk::MavlinkDirectServer::MavlinkMessage;
+    static const auto t0 = std::chrono::steady_clock::now();
+    static uint32_t cycle = 0;
+
+    const auto ms = std::to_string(
+        std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now() - t0).count());
+
+    // ~1 Hz: informações do gimbal manager
+    if (cycle++ % TELEMETRY_FREQUENCY_HZ == 0) {
+        Msg info;
+        info.message_name = "GIMBAL_MANAGER_INFORMATION";
+        info.fields_json = R"({
+            "time_boot_ms": )" + ms + R"(,
+            "cap_flags": 2016,
+            "gimbal_device_id": 1,
+            "roll_min": 0.0, "roll_max": 0.0,
+            "pitch_min": -2.094, "pitch_max": 0.349,
+            "yaw_min": -3.1416, "yaw_max": 3.1416
+        })";
+        this->gimbal_direct_server_.send_message(info);
+    }
+
+    // 10 Hz: status do manager
+    Msg status;
+    status.message_name = "GIMBAL_MANAGER_STATUS";
+    status.fields_json = R"({
+        "time_boot_ms": )" + ms + R"(,
+        "flags": 0,
+        "gimbal_device_id": 1,
+        "primary_control_sysid": 0,
+        "primary_control_compid": 0,
+        "secondary_control_sysid": 0,
+        "secondary_control_compid": 0
+    })";
+    this->gimbal_direct_server_.send_message(status);
+
+    // 10 Hz: atitude (quaternion identidade por enquanto)
+    Msg att;
+    att.message_name = "GIMBAL_DEVICE_ATTITUDE_STATUS";
+    att.fields_json = R"({
+        "target_system": 0,
+        "target_component": 0,
+        "time_boot_ms": )" + ms + R"(,
+        "flags": 0,
+        "q": [1.0, 0.0, 0.0, 0.0],
+        "angular_velocity_x": 0.0,
+        "angular_velocity_y": 0.0,
+        "angular_velocity_z": 0.0,
+        "failure_flags": 0,
+        "gimbal_device_id": 1
+    })";
+    this->gimbal_direct_server_.send_message(att);
 }
